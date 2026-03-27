@@ -1,0 +1,301 @@
+"""
+storage/database.py — Database session management and CRUD helpers.
+"""
+
+import hashlib
+import logging
+from contextlib import contextmanager
+from datetime import datetime
+from typing import Generator, Optional
+
+from sqlalchemy import create_engine, func, or_
+from sqlalchemy.orm import scoped_session, sessionmaker
+
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+from config import DATABASE_URL
+from storage.models import Base, CrawlRun, OracleUpdate, UpdateVersion
+
+log = logging.getLogger(__name__)
+
+# ── Engine & Session factory ───────────────────────────────────────────────────
+_engine  = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# expire_on_commit=False keeps attribute values accessible after the session
+# closes, preventing DetachedInstanceError when objects are used outside scope.
+_factory = sessionmaker(bind=_engine, autoflush=False, autocommit=False,
+                        expire_on_commit=False)
+Session  = scoped_session(_factory)
+
+
+def init_db() -> None:
+    """
+    Create all tables (idempotent) and migrate any missing columns.
+
+    SQLAlchemy's create_all() only creates tables that don't exist yet —
+    it never alters existing tables.  We therefore run explicit
+    ALTER TABLE statements for every column added after the initial schema,
+    catching the 'duplicate column' error so re-runs are safe.
+    """
+    Base.metadata.create_all(_engine)
+
+    # Columns added in v2 (version-tracking feature)
+    _add_column_if_missing("oracle_updates", "title_key",     "VARCHAR(64)")
+    _add_column_if_missing("oracle_updates", "version_count", "INTEGER DEFAULT 1")
+    # New table already created by create_all above (update_versions)
+
+    log.info("Database initialised at %s", DATABASE_URL)
+
+
+def _add_column_if_missing(table: str, column: str, col_type: str) -> None:
+    """ALTER TABLE … ADD COLUMN if the column does not exist yet."""
+    with _engine.connect() as conn:
+        # PRAGMA returns one row per existing column
+        result = conn.execute(
+            __import__("sqlalchemy").text(f"PRAGMA table_info({table})")
+        )
+        existing = {row[1] for row in result}   # row[1] is the column name
+        if column not in existing:
+            conn.execute(
+                __import__("sqlalchemy").text(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
+                )
+            )
+            conn.commit()
+            log.info("Migrated: added column %s.%s", table, column)
+
+
+@contextmanager
+def session_scope() -> Generator:
+    session = Session()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+# ── Version tracking helper ────────────────────────────────────────────────────
+
+def _title_key(source_name: str, title: str) -> str:
+    """
+    Stable SHA-256 identifier for a logical document (source + title).
+    Used to detect when the *same* document is updated between crawls.
+    """
+    raw = f"{source_name.strip()}::{title.strip().lower()}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+# ── OracleUpdate CRUD ──────────────────────────────────────────────────────────
+
+def upsert_update(data: dict) -> tuple[dict, bool]:
+    """
+    Insert or update an Oracle update, tracking version history.
+
+    Logic:
+      1. Look up by title_key (same logical document, any content).
+      2. If found with SAME content_hash  → no change, return False.
+      3. If found with DIFFERENT hash     → archive old content as a version,
+                                            update main record, return True.
+      4. Fall back to content_hash lookup for legacy rows without title_key.
+      5. Nothing found                    → insert new row, return True.
+
+    Always returns a plain dict (never a live ORM object).
+    """
+    tk = _title_key(data.get("source_name", ""), data.get("title", ""))
+
+    with session_scope() as s:
+        # ── 1. Look up by stable title_key ────────────────────────────────
+        existing = s.query(OracleUpdate).filter_by(title_key=tk).first()
+
+        # ── 2. Fallback: content_hash (covers rows seeded before versioning)
+        if existing is None:
+            existing = s.query(OracleUpdate).filter_by(
+                content_hash=data["content_hash"]
+            ).first()
+
+        if existing is not None:
+            # Same content → nothing to do
+            if existing.content_hash == data["content_hash"]:
+                return existing.to_dict(), False
+
+            # ── 3. Content changed: archive the old snapshot ───────────────
+            old_ver_num = existing.version_count or 1
+            snapshot = UpdateVersion(
+                update_id    = existing.id,
+                version_num  = old_ver_num,
+                content_hash = existing.content_hash,
+                title        = existing.title,
+                content      = existing.content,
+                summary      = existing.summary,
+                _tags        = existing._tags,
+                impact_level = existing.impact_level,
+                release_date = existing.release_date,
+                saved_at     = datetime.utcnow(),
+            )
+            s.add(snapshot)
+
+            # Update the main record to the new content
+            existing.content       = data.get("content", existing.content)
+            existing.summary       = data.get("summary")          # will be regenerated
+            existing._tags         = data.get("_tags", existing._tags)
+            existing.impact_level  = data.get("impact_level", existing.impact_level)
+            existing.content_hash  = data["content_hash"]
+            existing.crawled_at    = datetime.utcnow()
+            existing.is_new        = True
+            existing.title_key     = tk
+            existing.version_count = old_ver_num + 1
+
+            s.flush()
+            log.info("Updated existing record id=%s (now v%s): %s",
+                     existing.id, existing.version_count, existing.title[:60])
+            return existing.to_dict(), True
+
+        # ── 4/5. New record ────────────────────────────────────────────────
+        data["title_key"]     = tk
+        data["version_count"] = 1
+        record = OracleUpdate(**data)
+        s.add(record)
+        s.flush()
+        s.refresh(record)
+        log.debug("Inserted new update: %s", record.title[:80])
+        return record.to_dict(), True
+
+
+def get_update(update_id: int) -> Optional[OracleUpdate]:
+    with session_scope() as s:
+        return s.query(OracleUpdate).filter_by(id=update_id).first()
+
+
+def get_update_dict(update_id: int) -> Optional[dict]:
+    with session_scope() as s:
+        rec = s.query(OracleUpdate).filter_by(id=update_id).first()
+        return rec.to_dict() if rec else None
+
+
+def get_updates_by_ids(ids: list[int]) -> list[dict]:
+    """Fetch multiple updates by ID list."""
+    if not ids:
+        return []
+    with session_scope() as s:
+        rows = s.query(OracleUpdate).filter(OracleUpdate.id.in_(ids)).all()
+        # Preserve the requested order
+        order = {uid: i for i, uid in enumerate(ids)}
+        rows.sort(key=lambda r: order.get(r.id, 9999))
+        return [r.to_dict() for r in rows]
+
+
+def list_updates(
+    category:     Optional[str]  = None,
+    service:      Optional[str]  = None,
+    impact_level: Optional[str]  = None,
+    is_new:       Optional[bool] = None,
+    search:       Optional[str]  = None,
+    limit:        int = 200,
+    offset:       int = 0,
+) -> list[dict]:
+    with session_scope() as s:
+        q = s.query(OracleUpdate)
+        if category:
+            q = q.filter(OracleUpdate.category == category)
+        if service:
+            q = q.filter(OracleUpdate.service == service)
+        if impact_level:
+            q = q.filter(OracleUpdate.impact_level == impact_level)
+        if is_new is not None:
+            q = q.filter(OracleUpdate.is_new == is_new)
+        if search:
+            like = f"%{search}%"
+            q = q.filter(or_(
+                OracleUpdate.title.ilike(like),
+                OracleUpdate.content.ilike(like),
+                OracleUpdate.summary.ilike(like),
+            ))
+        rows = (q.order_by(OracleUpdate.crawled_at.desc())
+                  .offset(offset).limit(limit).all())
+        return [r.to_dict() for r in rows]
+
+
+def get_distinct_services() -> list[str]:
+    with session_scope() as s:
+        rows = s.query(OracleUpdate.service).distinct().all()
+    return sorted(r[0] for r in rows if r[0])
+
+
+def get_distinct_categories() -> list[str]:
+    with session_scope() as s:
+        rows = s.query(OracleUpdate.category).distinct().all()
+    return sorted(r[0] for r in rows if r[0])
+
+
+def get_stats() -> dict:
+    with session_scope() as s:
+        total    = s.query(func.count(OracleUpdate.id)).scalar() or 0
+        new      = s.query(func.count(OracleUpdate.id)).filter(OracleUpdate.is_new == True).scalar() or 0
+        by_cat   = s.query(OracleUpdate.category, func.count(OracleUpdate.id)).group_by(OracleUpdate.category).all()
+        by_svc   = s.query(OracleUpdate.service,  func.count(OracleUpdate.id)).group_by(OracleUpdate.service).all()
+        by_imp   = s.query(OracleUpdate.impact_level, func.count(OracleUpdate.id)).group_by(OracleUpdate.impact_level).all()
+        last_run = (s.query(CrawlRun)
+                     .filter(CrawlRun.status != "running")
+                     .order_by(CrawlRun.completed_at.desc())
+                     .first())
+    return {
+        "total":       total,
+        "new":         new,
+        "by_category": dict(by_cat),
+        "by_service":  dict(by_svc),
+        "by_impact":   dict(by_imp),
+        "last_run":    last_run.to_dict() if last_run else None,
+    }
+
+
+def mark_all_seen() -> int:
+    with session_scope() as s:
+        n = s.query(OracleUpdate).filter(OracleUpdate.is_new == True).update({"is_new": False})
+    return n
+
+
+# ── Version history ────────────────────────────────────────────────────────────
+
+def get_versions(update_id: int) -> list[dict]:
+    """Return all archived snapshots for a given update, oldest first."""
+    with session_scope() as s:
+        rows = (s.query(UpdateVersion)
+                  .filter_by(update_id=update_id)
+                  .order_by(UpdateVersion.version_num.asc())
+                  .all())
+    return [r.to_dict() for r in rows]
+
+
+# ── CrawlRun CRUD ──────────────────────────────────────────────────────────────
+
+def start_crawl_run() -> int:
+    with session_scope() as s:
+        run = CrawlRun(started_at=datetime.utcnow())
+        s.add(run)
+        s.flush()
+        return run.id
+
+
+def finish_crawl_run(run_id, sources_tried, updates_found, updates_new,
+                     status="success", error=None):
+    with session_scope() as s:
+        run = s.query(CrawlRun).filter_by(id=run_id).first()
+        if run:
+            run.completed_at  = datetime.utcnow()
+            run.sources_tried = sources_tried
+            run.updates_found = updates_found
+            run.updates_new   = updates_new
+            run.status        = status
+            run.error_message = error
+
+
+def list_crawl_runs(limit: int = 20) -> list[dict]:
+    with session_scope() as s:
+        rows = (s.query(CrawlRun)
+                  .order_by(CrawlRun.started_at.desc())
+                  .limit(limit).all())
+    return [r.to_dict() for r in rows]

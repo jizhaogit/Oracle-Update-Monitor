@@ -1,0 +1,11 @@
+# Oracle OCI/OIC Monitor — FULL dependencies
+# Adds local AI embeddings + vector search on top of core.
+# Requires ~2 GB disk space for PyTorch.
+
+-r requirements-core.txt
+
+# Local embeddings (no API key needed)
+sentence-transformers>=2.2.2
+
+# Vector store
+chromadb>=0.4.22

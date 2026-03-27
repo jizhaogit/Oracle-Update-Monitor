@@ -1,0 +1,41 @@
+# ── Python bytecode ───────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# ── Virtual environments ──────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Portable runtime (auto-downloaded by run.bat) ─────────
+runtime/
+
+# ── Environment / secrets ─────────────────────────────────
+.env
+!.env.example
+
+# ── All runtime data (database, crawled pages, vectors) ───
+data/
+
+# ── Logs ──────────────────────────────────────────────────
+logs/
+*.log
+
+# ── Distribution build output ─────────────────────────────
+*.zip
+dist/
+build/
+
+# ── OS / editor noise ────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
