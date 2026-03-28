@@ -35,7 +35,7 @@ Oracle regularly publishes updates to its cloud services across dozens of produc
 
 **Oracle OCI/OIC/HCM Monitor** automates this by:
 
-- Crawling 13 official Oracle documentation pages on a configurable schedule (default: every 24 hours)
+- Crawling 14 official Oracle documentation pages on a configurable schedule (default: every 24 hours)
 - Detecting new entries and content changes between crawls
 - Archiving previous versions of any changed document
 - Classifying each update by impact level (High / Medium / Low) and extracting relevant tags using rule-based analysis
@@ -50,19 +50,20 @@ The tool is distributed as a **portable green package** — copy the folder to a
 
 | # | Category | Source Name | Type | URL |
 |---|---|---|---|---|
-| 1 | 👤 HCM | What's New | What's New | [saas/readiness/hcm.html](https://docs.oracle.com/en/cloud/saas/readiness/hcm.html) |
-| 2 | 👤 HCM | REST API Endpoints | Release Notes | [human-resources/farws/rest-endpoints.html](https://docs.oracle.com/en/cloud/saas/human-resources/farws/rest-endpoints.html) |
-| 3 | ☁ OCI | What's New | What's New | [servicechanges.htm](https://docs.oracle.com/en-us/iaas/Content/servicechanges.htm) |
-| 4 | ☁ OCI | Release Notes (All) | Release Notes | [releasenotes/](https://docs.oracle.com/en-us/iaas/releasenotes/) |
-| 5 | ☁ OCI | Compute | Release Notes | [releasenotes/changes/compute/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/compute/) |
-| 6 | ☁ OCI | Networking | Release Notes | [releasenotes/changes/network/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/network/) |
-| 7 | ☁ OCI | Database | Release Notes | [releasenotes/changes/database/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/database/) |
-| 8 | ☁ OCI | Storage | Release Notes | [releasenotes/changes/storage/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/storage/) |
-| 9 | ☁ OCI | Security | Release Notes | [releasenotes/changes/security/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/security/) |
-| 10 | ☁ OCI | Analytics | Release Notes | [releasenotes/changes/analytics/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/analytics/) |
-| 11 | ☁ OCI | Containers & Kubernetes | Release Notes | [releasenotes/changes/containers/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/containers/) |
-| 12 | 🔗 OIC | What's New | What's New | [integration-cloud/whats-new/](https://docs.oracle.com/en/cloud/paas/integration-cloud/whats-new/) |
-| 13 | 🔗 OIC | Release Notes | Release Notes | [integration-cloud/release-notes/](https://docs.oracle.com/en/cloud/paas/integration-cloud/release-notes/) |
+| 1 | 👤 HCM | REST API Usage | Reference | [human-resources/index.html](https://docs.oracle.com/en/cloud/saas/human-resources/index.html) |
+| 2 | 👤 HCM | What's New | What's New | [saas/readiness/hcm.html](https://docs.oracle.com/en/cloud/saas/readiness/hcm.html) |
+| 3 | 👤 HCM | REST API Endpoints | Release Notes | [human-resources/farws/rest-endpoints.html](https://docs.oracle.com/en/cloud/saas/human-resources/farws/rest-endpoints.html) |
+| 4 | ☁ OCI | What's New | What's New | [servicechanges.htm](https://docs.oracle.com/en-us/iaas/Content/servicechanges.htm) |
+| 5 | ☁ OCI | Release Notes (All) | Release Notes | [releasenotes/](https://docs.oracle.com/en-us/iaas/releasenotes/) |
+| 6 | ☁ OCI | Compute | Release Notes | [releasenotes/changes/compute/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/compute/) |
+| 7 | ☁ OCI | Networking | Release Notes | [releasenotes/changes/network/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/network/) |
+| 8 | ☁ OCI | Database | Release Notes | [releasenotes/changes/database/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/database/) |
+| 9 | ☁ OCI | Storage | Release Notes | [releasenotes/changes/storage/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/storage/) |
+| 10 | ☁ OCI | Security | Release Notes | [releasenotes/changes/security/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/security/) |
+| 11 | ☁ OCI | Analytics | Release Notes | [releasenotes/changes/analytics/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/analytics/) |
+| 12 | ☁ OCI | Containers & Kubernetes | Release Notes | [releasenotes/changes/containers/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/containers/) |
+| 13 | 🔗 OIC | What's New | What's New | [integration-cloud/whats-new/](https://docs.oracle.com/en/cloud/paas/integration-cloud/whats-new/) |
+| 14 | 🔗 OIC | Release Notes | Release Notes | [integration-cloud/release-notes/](https://docs.oracle.com/en/cloud/paas/integration-cloud/release-notes/) |
 
 > Sources are defined in `config.py` (`ORACLE_SOURCES`) and can be extended with additional Oracle documentation URLs without any code changes.
 
@@ -72,7 +73,7 @@ The tool is distributed as a **portable green package** — copy the folder to a
 
 | Feature | Description |
 |---|---|
-| **Automated crawling** | Polls 13 Oracle OCI/OIC/HCM documentation URLs; configurable interval |
+| **Automated crawling** | Polls 14 Oracle OCI/OIC/HCM documentation URLs; configurable interval |
 | **Change detection** | SHA-256 content hashing detects new entries and content updates |
 | **Version history** | Keeps full snapshots of every previous version of a changed document |
 | **Impact classification** | Rule-based classifier tags each update as High / Medium / Low impact |
@@ -174,12 +175,19 @@ OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-3.5-turbo
 
 ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
 
 BEDROCK_REGION=us-east-1
-BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
+BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0
+BEDROCK_PROFILE=                    # optional AWS SSO profile name
 
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3
+
+# ── Crawl LLM timeout ───────────────────────────────────
+# Hard cut-off (seconds) for per-record LLM calls during crawl.
+# If the LLM takes longer, rule-based classification is used instead.
+LLM_TIMEOUT=15
 
 # ── Crawl schedule ──────────────────────────────────────
 CRAWL_INTERVAL_HOURS=24     # how often to check for updates
@@ -339,6 +347,7 @@ The API is available at `http://127.0.0.1:8000`. Interactive documentation (Swag
 | `POST` | `/mark-seen` | Mark all new updates as seen |
 | `POST` | `/analyze` | Start async AI impact analysis — body: `{"ids": [1], "force": false}` |
 | `GET` | `/analyze/{job_id}` | Poll for the result of an async analyze job |
+| `POST` | `/ask` | Q&A over stored documents — body: `{"question": "..."}` |
 
 **`/analyze` request body:**
 

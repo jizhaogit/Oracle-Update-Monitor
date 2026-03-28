@@ -32,6 +32,12 @@ DATABASE_URL = f"sqlite:///{DB_DIR}/oracle_monitor.db"
 # Each entry: display_name → {url, category, service, type}
 ORACLE_SOURCES: dict[str, dict] = {
     # HCM first — REST API records are pre-classified (no LLM), so they store quickly
+    "HCM — REST API Usage": {
+        "url": "https://docs.oracle.com/en/cloud/saas/human-resources/index.html",
+        "category": "HCM",
+        "service": "REST API Usage",
+        "doc_type": "reference",
+    },
     "HCM — What's New": {
         "url": "https://docs.oracle.com/en/cloud/saas/readiness/hcm.html",
         "category": "HCM",
@@ -180,8 +186,6 @@ EMBEDDINGS_MODEL    = os.getenv("EMBEDDINGS_MODEL", "all-MiniLM-L6-v2")
 
 # Max seconds for a single LLM classification call (crawl) before falling back to rule-based
 LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "15"))
-# Max seconds for a full LLM impact analysis (Analyze button) — needs more time than classify
-LLM_ANALYZE_TIMEOUT = int(os.getenv("LLM_ANALYZE_TIMEOUT", "120"))
 
 # ── Scheduler ──────────────────────────────────────────────────────────────────
 CRAWL_INTERVAL_HOURS = int(os.getenv("CRAWL_INTERVAL_HOURS", "24"))

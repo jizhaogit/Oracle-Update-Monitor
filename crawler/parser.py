@@ -135,6 +135,98 @@ def _generic_heading_parse(soup: BeautifulSoup) -> list[dict]:
 
 # ── HCM-specific parsers ───────────────────────────────────────────────────────
 
+def _try_hcm_api_usage(soup: BeautifulSoup) -> list[dict]:
+    """
+    Parse the Oracle HCM REST API index page
+    (https://docs.oracle.com/en/cloud/saas/human-resources/index.html).
+
+    The page lists available REST API resource groups. Each entry becomes one
+    record whose content describes what the resource does and which HTTP
+    operations (GET / POST / PATCH / DELETE) are supported.
+
+    Strategy:
+    1. Look for <table> rows listing resource names + descriptions (common Oracle
+       API index layout).
+    2. Fall back to <dt>/<dd> definition lists.
+    3. Fall back to <h3>/<h4> heading + following paragraph.
+    """
+    items: list[dict] = []
+    seen: set[str] = set()
+
+    _method_words = {"get", "post", "patch", "put", "delete"}
+
+    def _extract_methods(text: str) -> str:
+        found = [m.upper() for m in _method_words if m in text.lower()]
+        return ", ".join(found) if found else ""
+
+    def _make_usage_content(title: str, description: str, methods: str) -> str:
+        parts = []
+        if methods:
+            parts.append(f"Supported operations: {methods}")
+        if description:
+            parts.append(description)
+        if not parts:
+            parts.append(title)
+        return " | ".join(parts)
+
+    def _add(title: str, description: str) -> None:
+        key = title.lower().strip()
+        if len(title) < 4 or key in seen:
+            return
+        seen.add(key)
+        methods = _extract_methods(description)
+        content = _make_usage_content(title, description, methods)
+        # GET-only resources are informational (Low); resources with write
+        # operations warrant more attention (Medium/High)
+        write_ops = {"POST", "PATCH", "PUT", "DELETE"}
+        has_write = any(m in (methods or "") for m in write_ops)
+        impact = "Medium" if has_write else "Low"
+        summary = f"REST API resource — {title}" + (f" ({methods})" if methods else "")
+        items.append({
+            "title":        title,
+            "content":      content,
+            "release_date": None,
+            "impact_level": impact,
+            "summary":      summary,
+        })
+
+    # Strategy 1 — table rows (resource name | description | operations)
+    for row in soup.find_all("tr")[1:500]:
+        cells = row.find_all(["td", "th"])
+        if len(cells) >= 2:
+            title = _clean(cells[0].get_text())
+            desc  = _clean(" ".join(c.get_text() for c in cells[1:]))
+            _add(title, desc)
+
+    if items:
+        return items
+
+    # Strategy 2 — definition list <dt>/<dd>
+    for dt in soup.find_all("dt")[:500]:
+        title = _clean(dt.get_text())
+        dd    = dt.find_next_sibling("dd")
+        desc  = _clean(dd.get_text(separator=" ")) if dd else ""
+        _add(title, desc)
+
+    if items:
+        return items
+
+    # Strategy 3 — heading + following paragraph
+    for heading in soup.find_all(["h2", "h3", "h4"])[:200]:
+        title = _clean(heading.get_text())
+        parts: list[str] = []
+        for sib in heading.next_siblings:
+            if not isinstance(sib, Tag):
+                continue
+            if sib.name in ("h2", "h3", "h4"):
+                break
+            text = _clean(sib.get_text())
+            if text:
+                parts.append(text)
+        _add(title, " ".join(parts)[:800])
+
+    return items
+
 def _try_hcm_rest_endpoints(soup: BeautifulSoup) -> list[dict]:
     """
     Parse Oracle HCM REST API endpoint pages.
@@ -237,7 +329,9 @@ def parse_oracle_page(
 
     # HCM pages have a distinct structure — use dedicated parsers first
     if category == "HCM":
-        if service == "REST API":
+        if service == "REST API Usage":
+            items = _try_hcm_api_usage(soup)
+        elif service == "REST API":
             items = _try_hcm_rest_endpoints(soup)
         if not items:
             items = _try_hcm_readiness(soup)
