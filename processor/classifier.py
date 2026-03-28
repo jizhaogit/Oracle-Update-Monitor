@@ -16,8 +16,11 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from config import (
-    IMPACT_KEYWORDS, LLM_PROVIDER, OLLAMA_BASE_URL, OLLAMA_MODEL,
-    OPENAI_API_KEY, OPENAI_MODEL, TAG_KEYWORDS,
+    IMPACT_KEYWORDS, LLM_PROVIDER, TAG_KEYWORDS,
+    OPENAI_API_KEY, OPENAI_MODEL,
+    ANTHROPIC_API_KEY, ANTHROPIC_MODEL,
+    BEDROCK_MODEL_ID, BEDROCK_REGION, BEDROCK_PROFILE,
+    OLLAMA_BASE_URL, OLLAMA_MODEL,
 )
 
 log = logging.getLogger(__name__)
@@ -81,10 +84,35 @@ def _get_llm():
             )
             log.info("LLM: OpenAI %s", OPENAI_MODEL)
 
+        elif LLM_PROVIDER == "anthropic" and ANTHROPIC_API_KEY:
+            from langchain_anthropic import ChatAnthropic
+            _llm = ChatAnthropic(
+                model=ANTHROPIC_MODEL,
+                anthropic_api_key=ANTHROPIC_API_KEY,
+                temperature=0,
+                max_tokens=4096,
+            )
+            log.info("LLM: Anthropic %s", ANTHROPIC_MODEL)
+
+        elif LLM_PROVIDER == "bedrock":
+            import boto3
+            from langchain_aws import ChatBedrock
+            # Honour a named SSO profile if provided; otherwise use the default
+            # credential chain (env vars, ~/.aws/credentials, instance role, SSO)
+            session = (boto3.Session(profile_name=BEDROCK_PROFILE)
+                       if BEDROCK_PROFILE else boto3.Session())
+            client = session.client("bedrock-runtime", region_name=BEDROCK_REGION)
+            _llm = ChatBedrock(
+                model_id=BEDROCK_MODEL_ID,
+                client=client,
+                model_kwargs={"temperature": 0, "max_tokens": 4096},
+            )
+            log.info("LLM: AWS Bedrock %s (%s)", BEDROCK_MODEL_ID, BEDROCK_REGION)
+
         elif LLM_PROVIDER == "ollama":
-            from langchain_community.llms import Ollama
-            _llm = Ollama(base_url=OLLAMA_BASE_URL, model=OLLAMA_MODEL, temperature=0)
-            log.info("LLM: Ollama %s @ %s", OLLAMA_MODEL, OLLAMA_BASE_URL)
+            from langchain_community.chat_models import ChatOllama
+            _llm = ChatOllama(base_url=OLLAMA_BASE_URL, model=OLLAMA_MODEL, temperature=0)
+            log.info("LLM: Ollama (chat) %s @ %s", OLLAMA_MODEL, OLLAMA_BASE_URL)
 
     except Exception as exc:
         log.warning("LLM init failed (%s), falling back to rule-based: %s", LLM_PROVIDER, exc)

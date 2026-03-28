@@ -159,6 +159,33 @@ input[type=checkbox]{accent-color:var(--accent2);width:15px;height:15px}
 .tag-list{display:flex;flex-wrap:wrap;gap:3px}
 .tag-sm{background:var(--bg-light);padding:1px 6px;border-radius:2px;font-size:0.67rem}
 
+/* ── Impact Analysis result panel ── */
+#analysis-result{margin-top:24px;padding:18px 20px;background:var(--bg-card);
+  border-radius:6px;border:1px solid var(--accent2);line-height:1.75}
+#analysis-result h2{color:var(--accent2);font-size:1.07rem;margin:16px 0 8px;padding-bottom:4px;
+  border-bottom:1px solid var(--bg-light)}
+#analysis-result h3{color:var(--accent);font-size:0.93rem;margin:14px 0 6px}
+#analysis-result h4{color:var(--text);font-size:0.87rem;font-weight:700;margin:10px 0 4px}
+#analysis-result p{margin:6px 0}
+#analysis-result hr{border:none;border-top:1px solid var(--bg-light);margin:16px 0}
+#analysis-result blockquote{border-left:3px solid var(--accent2);margin:10px 0;
+  padding:8px 14px;background:var(--bg-mid);color:var(--text-dim);border-radius:0 4px 4px 0;font-size:0.8rem}
+#analysis-result ol,#analysis-result ul{margin:8px 0 8px 22px}
+#analysis-result li{margin:5px 0}
+#analysis-result strong{color:var(--text);font-weight:700}
+#analysis-result code{background:var(--bg-light);padding:1px 6px;border-radius:3px;font-family:monospace;font-size:0.87rem}
+/* Modal footer */
+#modal-footer{padding:10px 20px;border-top:1px solid var(--bg-light);flex-shrink:0;
+  display:flex;align-items:center;gap:12px;background:var(--bg-mid)}
+#analysis-status{font-size:0.8rem;color:var(--text-dim)}
+.btn-analyze{background:#00695c}
+.btn-analyze:hover:not(:disabled){background:#00897b}
+/* Loading spinner */
+.a-loading{display:flex;align-items:center;gap:10px;color:var(--text-dim);padding:10px 0}
+.spinner{width:18px;height:18px;border:2px solid var(--bg-light);flex-shrink:0;
+  border-top-color:var(--accent2);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
 /* Color picker */
 input[type=color]{width:32px;height:32px;border:1px solid #3a3f6a;border-radius:4px;
   padding:2px;background:var(--bg-light);cursor:pointer;vertical-align:middle}
@@ -295,6 +322,13 @@ input[type=color]{width:32px;height:32px;border:1px solid #3a3f6a;border-radius:
     </div>
     <div id="modal-body">
       <div id="modal-content"></div>
+      <div id="analysis-result" style="display:none"></div>
+    </div>
+    <div id="modal-footer">
+      <button class="btn btn-analyze" id="btn-analyze" onclick="runAnalysis()">
+        🧠 Analyze Impact &amp; Upgrade Guide
+      </button>
+      <span id="analysis-status"></span>
     </div>
   </div>
 </div>
@@ -543,6 +577,12 @@ function renderConclusion(records){
   if(!records||records.length===0){
     alert('No data to compare.');return;
   }
+  // track IDs for the Analyze button; reset previous analysis
+  _analysisIds=records.map(r=>r.id);
+  const ar=$('analysis-result');
+  ar.style.display='none'; ar.innerHTML='';
+  $('analysis-status').textContent='';
+  $('btn-analyze').disabled=false;
   $('modal-overlay').classList.add('open');
 
   const hasManyVersions=records.some(r=>(r.version_count||1)>1);
@@ -703,8 +743,77 @@ function fmtDate(iso){
 }
 
 /* ── Modal helpers ─────────────────────────────────────── */
-function closeModal(){$('modal-overlay').classList.remove('open')}
+function closeModal(){
+  $('modal-overlay').classList.remove('open');
+  // reset analysis panel for next open
+  const ar=$('analysis-result');
+  ar.style.display='none'; ar.innerHTML='';
+  $('analysis-status').textContent='';
+  $('btn-analyze').disabled=false;
+}
 function closeModalOnBg(e){if(e.target===$('modal-overlay'))closeModal()}
+
+/* ── Markdown → HTML (lightweight renderer for analysis output) ── */
+function mdToHtml(md){
+  const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const inline=s=>esc(s)
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>');
+  const lines=md.split('\n');
+  let html='', inOl=false, inUl=false;
+  const closeLists=()=>{
+    if(inOl){html+='</ol>';inOl=false;}
+    if(inUl){html+='</ul>';inUl=false;}
+  };
+  for(const raw of lines){
+    const t=raw.trimEnd();
+    if(/^### /.test(t))     {closeLists();html+=`<h4>${inline(t.slice(4))}</h4>`;}
+    else if(/^## /.test(t)) {closeLists();html+=`<h3>${inline(t.slice(3))}</h3>`;}
+    else if(/^# /.test(t))  {closeLists();html+=`<h2>${inline(t.slice(2))}</h2>`;}
+    else if(/^---+$/.test(t)){closeLists();html+='<hr>';}
+    else if(/^> /.test(t))  {closeLists();html+=`<blockquote>${inline(t.slice(2))}</blockquote>`;}
+    else if(/^\d+\. /.test(t)){
+      if(!inOl){if(inUl){html+='</ul>';inUl=false;}html+='<ol>';inOl=true;}
+      html+=`<li>${inline(t.replace(/^\d+\. /,''))}</li>`;
+    }else if(/^[-*•] /.test(t)){
+      if(!inUl){if(inOl){html+='</ol>';inOl=false;}html+='<ul>';inUl=true;}
+      html+=`<li>${inline(t.replace(/^[-*•] /,''))}</li>`;
+    }else if(t===''){
+      closeLists();html+='<br>';
+    }else{
+      closeLists();html+=`<p>${inline(t)}</p>`;
+    }
+  }
+  closeLists();
+  return html;
+}
+
+/* ── Impact Analysis ─────────────────────────────────────── */
+let _analysisIds=[];   // IDs currently loaded in the modal
+
+async function runAnalysis(){
+  if(!_analysisIds.length)return;
+  const btn=$('btn-analyze');
+  const ar=$('analysis-result');
+  btn.disabled=true;
+  $('analysis-status').textContent='';
+  ar.innerHTML='<div class="a-loading"><div class="spinner"></div><span>Analysing with AI — this may take a moment…</span></div>';
+  ar.style.display='block';
+  ar.scrollIntoView({behavior:'smooth',block:'nearest'});
+  try{
+    const data=await api('/analyze',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids:_analysisIds})
+    });
+    ar.innerHTML=mdToHtml(data.analysis);
+  }catch(e){
+    ar.innerHTML=`<p style="color:var(--red)">⚠ Analysis failed: ${esc(e.message)}</p>`;
+  }finally{
+    btn.disabled=false;
+  }
+}
 
 /* ── Util helpers ──────────────────────────────────────── */
 function el(tag,cls='',html=''){

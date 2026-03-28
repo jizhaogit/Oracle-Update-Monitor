@@ -37,6 +37,7 @@ from storage.database import (
     get_distinct_categories, get_distinct_services, mark_all_seen,
 )
 from processor.summarizer import ask as qa_ask, semantic_search
+from processor.analyzer import analyze_impact
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +59,9 @@ app.add_middleware(
 
 class AskRequest(BaseModel):
     question: str
+
+class AnalyzeRequest(BaseModel):
+    ids: list[int]
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -171,6 +175,21 @@ def mark_seen():
 def ask_question(body: AskRequest):
     answer = qa_ask(body.question)
     return {"question": body.question, "answer": answer}
+
+
+@app.post("/analyze")
+def analyze_updates(body: AnalyzeRequest):
+    """
+    Analyze selected updates and return Markdown upgrade guidance.
+    Uses LLM if configured; falls back to rule-based keyword analysis.
+    """
+    if not body.ids:
+        raise HTTPException(status_code=400, detail="No IDs provided")
+    records = get_updates_by_ids(body.ids)
+    if not records:
+        raise HTTPException(status_code=404, detail="No updates found for given IDs")
+    analysis = analyze_impact(records)
+    return {"ids": body.ids, "count": len(records), "analysis": analysis}
 
 
 @app.get("/updates/{update_id}/versions")

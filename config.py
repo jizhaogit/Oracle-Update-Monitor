@@ -141,9 +141,23 @@ TAG_KEYWORDS: dict[str, str] = {
 }
 
 # ── LLM / AI settings ──────────────────────────────────────────────────────────
-LLM_PROVIDER        = os.getenv("LLM_PROVIDER", "none")          # "openai" | "ollama" | "none"
+# Options: "openai" | "anthropic" | "bedrock" | "ollama" | "none"
+LLM_PROVIDER        = os.getenv("LLM_PROVIDER", "none")
+
+# OpenAI
 OPENAI_API_KEY      = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL        = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+
+# Anthropic direct API (sk-ant-... key from IT or platform.anthropic.com)
+ANTHROPIC_API_KEY   = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL     = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+
+# AWS Bedrock (uses AWS SSO / IAM credentials — no Anthropic key needed)
+BEDROCK_MODEL_ID    = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+BEDROCK_REGION      = os.getenv("BEDROCK_REGION", "us-east-1")
+BEDROCK_PROFILE     = os.getenv("BEDROCK_PROFILE", "")   # AWS SSO profile name (optional)
+
+# Ollama local LLM
 OLLAMA_BASE_URL     = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL        = os.getenv("OLLAMA_MODEL", "llama2")
 
