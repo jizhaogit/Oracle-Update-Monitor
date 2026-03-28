@@ -359,6 +359,13 @@ async function loadAll(){
   try{
     const [updates,stats]=await Promise.all([api('/updates?limit=5000'),api('/stats')]);
     ALL=updates;
+    ALL.sort((a,b)=>{
+      const da=a.release_date, db=b.release_date;
+      if(!da&&!db) return a.title.localeCompare(b.title);
+      if(!da) return -1;
+      if(!db) return 1;
+      return db.localeCompare(da);
+    });
     renderTree(ALL);renderTable(ALL);renderStats(stats);
     const nw=ALL.filter(u=>u.is_new).length;
     $('sidebar-meta').textContent=`${ALL.length}${nw?' · ✦'+nw:''}`;
@@ -412,7 +419,12 @@ function renderTree(items){
       const svcBody=el('div');
       svcEl.onclick=()=>svcBody.style.display=svcBody.style.display==='none'?'':'none';
       catBody.appendChild(svcEl);catBody.appendChild(svcBody);
-      [...its].sort((a,b)=>(b.crawled_at||'').localeCompare(a.crawled_at||'')).forEach(item=>{
+      [...its].sort((a,b)=>{
+        const da=a.release_date,db=b.release_date;
+        if(!da&&!db)return a.title.localeCompare(b.title);
+        if(!da)return -1; if(!db)return 1;
+        return db.localeCompare(da);
+      }).forEach(item=>{
         const imp=item.impact_level;
         const cls='t-item'+(item.is_new?' isnew':'')+
           (imp==='High'?' hi':imp==='Medium'?' me':imp==='Low'?' lo':'')+

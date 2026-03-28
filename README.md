@@ -9,10 +9,11 @@ An intelligent, self-contained tool for tracking Oracle Cloud Infrastructure (OC
 1. [Introduction](#introduction)
 2. [Monitored Sources](#monitored-sources)
 3. [Key Features](#key-features)
-4. [Architecture Overview](#architecture-overview)
-5. [Quick Start](#quick-start)
-6. [Configuration](#configuration)
-7. [Using the UI](#using-the-ui)
+4. [How Topics and Impact Levels Work](#how-topics-and-impact-levels-work)
+5. [Architecture Overview](#architecture-overview)
+6. [Quick Start](#quick-start)
+7. [Configuration](#configuration)
+8. [Using the UI](#using-the-ui)
    - [Toolbar](#toolbar)
    - [Sidebar](#sidebar)
    - [Detail View](#detail-view)
@@ -21,11 +22,11 @@ An intelligent, self-contained tool for tracking Oracle Cloud Infrastructure (OC
    - [Conclusion (Comparison) Modal](#conclusion-comparison-modal)
    - [AI Impact Analysis](#ai-impact-analysis)
    - [Appearance Settings](#appearance-settings)
-8. [REST API Reference](#rest-api-reference)
-9. [Command-Line Options](#command-line-options)
-10. [Project Structure](#project-structure)
-11. [Dependencies](#dependencies)
-12. [Troubleshooting](#troubleshooting)
+9. [REST API Reference](#rest-api-reference)
+10. [Command-Line Options](#command-line-options)
+11. [Project Structure](#project-structure)
+12. [Dependencies](#dependencies)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -83,6 +84,63 @@ The tool is distributed as a **portable green package** — copy the folder to a
 | **Appearance control** | Per-user font-size selector and background colour picker (saved in browser) |
 | **Portable runtime** | Ships as a self-contained folder; `run.bat` downloads Python automatically |
 | **REST API** | Full FastAPI backend with interactive Swagger docs at `/docs` |
+
+---
+
+## How Topics and Impact Levels Work
+
+### Topic Generation
+
+When a crawl runs, the app fetches each source URL as raw HTML — **before any JavaScript executes**. Many Oracle pages (like OIC What's New) build their visible content dynamically in the browser, so the JS-rendered topic list is not available. The parser works through a three-strategy fallback chain on the static HTML:
+
+| Priority | HTML looked for | Title comes from | Content comes from |
+|---|---|---|---|
+| 1st | `<dt>` / `<dd>` definition lists | `<dt>` text | `<dd>` text |
+| 2nd | `<tr>` table rows | First `<td>` cell | Remaining `<td>` cells joined |
+| 3rd (fallback) | `<h2>` / `<h3>` headings | Heading text | All siblings until the next heading |
+
+This means the topics shown in the app come from the **static headings and list structures** in Oracle's raw page source — which may differ from the fully-rendered view you see in a browser. A maximum of **50 items per page** are captured.
+
+HCM REST API pages use dedicated parsers that directly extract operation names and HTTP methods from Oracle's structured `<dl>` format, so those results are more complete and accurate.
+
+---
+
+### Impact Level Classification
+
+Every parsed record is automatically assigned an impact level by scanning the full title + content text for keyword matches. The check runs **in order — first match wins**:
+
+| Level | Triggers when the text contains any of these keywords |
+|---|---|
+| 🔴 **High** | `breaking change` · `deprecated` · `removed` · `critical` · `security` · `vulnerability` · `end of life` · `eol` · `migration required` |
+| 🟡 **Medium** | `new feature` · `enhancement` · `improvement` · `added` · `updated` · `expanded` · `new service` · `preview` |
+| 🟢 **Low** | `documentation` · `bug fix` · `minor` · `typo` · `clarification` · `updated docs` · `note` |
+| 🟢 **Low** | *(default — no keywords matched)* |
+
+**Example:** "Oracle Integration Generation 2 End of Life" → contains `end of life` → **High**
+
+**Example:** "New REST adapter added for SAP" → contains `new` and `added` → **Medium** (Medium matched first)
+
+**Example:** "April 2025" *(a bare month heading)* → no keywords match → **Low** (default)
+
+> **Tip:** The keyword lists are defined in `config.py → IMPACT_KEYWORDS`. You can add, remove, or change keywords there without touching any other code — just restart the app and re-crawl.
+
+---
+
+### Auto-Tagging
+
+Tags are extracted from the same title + content scan using a separate keyword → tag mapping (`config.py → TAG_KEYWORDS`). The service name is always included as a tag.
+
+| Keyword found in text | Tag assigned |
+|---|---|
+| `security` | Security |
+| `api` | API |
+| `integration` | Integration |
+| `ai` · `machine learning` | AI/ML |
+| `generative` | GenAI |
+| `kubernetes` · `container` | Kubernetes / Containers |
+| `compute` · `instance` | Compute |
+| `database` · `autonomous` | Database |
+| `terraform` | Terraform |
 
 ---
 

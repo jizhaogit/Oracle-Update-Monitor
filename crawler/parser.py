@@ -133,6 +133,150 @@ def _generic_heading_parse(soup: BeautifulSoup) -> list[dict]:
     return items
 
 
+# ── OIC-specific parsers ───────────────────────────────────────────────────────
+
+def _try_oic_whats_new(soup: BeautifulSoup) -> list[dict]:
+    """
+    Parse Oracle OIC 'What's New' page.
+
+    The page uses a flat sibling structure inside <div class="letterstyle">:
+      <div class="sect4">  — release section heading (h3 + description div)
+      <div class="sect5">  — feature sub-section (h4 + table inside a div)
+      <div class="sect5">  — another sub-section under the same release
+      <div class="sect4">  — next release section
+      ...
+
+    sect4 and sect5 divs are all direct children of letterstyle at the same
+    level — sect5 does NOT nest inside sect4.
+
+    This parser produces:
+      1. One record per sect4 heading (e.g. "Oracle Integration Generation 2
+         End of Life", "October 2025") with description text as content.
+      2. One record per feature table row inside each sect5, titled
+         "<Release> — <Feature name>" for full context.
+
+    Falls back to generic h3-based parsing if the letterstyle structure is
+    not found (e.g. Oracle changes their page layout).
+
+    Caps: 60 release sections · 15 rows per sub-section table · 500 total.
+    """
+    items:  list[dict] = []
+    seen:   set[str]   = set()
+    MAX_TOTAL           = 500
+    MAX_SECTIONS        = 60
+    MAX_ROWS_PER_TABLE  = 15
+
+    def _add_section(title: str, content: str) -> None:
+        if title in seen or len(title) < 3:
+            return
+        seen.add(title)
+        date = _parse_date(title) or _parse_date(content)
+        items.append({"title": title, "content": content or title,
+                      "release_date": date})
+
+    def _add_feature(section_title: str, feat_name: str,
+                     feat_desc: str, date) -> None:
+        if len(feat_name) < 4:
+            return
+        full_title = f"{section_title} — {feat_name}"
+        key = full_title.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        items.append({"title": full_title[:480],
+                      "content": feat_desc or feat_name,
+                      "release_date": date})
+
+    # ── Primary: letterstyle flat-sibling structure ─────────────────────────
+    letterstyle = soup.find("div", class_="letterstyle")
+    if letterstyle:
+        current_section: str  = ""
+        current_date           = None
+        sections_seen          = 0
+
+        for child in letterstyle.children:
+            if not isinstance(child, Tag):
+                continue
+            if len(items) >= MAX_TOTAL:
+                break
+
+            classes = child.get("class") or []
+
+            if "sect4" in classes:
+                if sections_seen >= MAX_SECTIONS:
+                    break
+                heading = child.find("h3") or child.find("h2")
+                if not heading:
+                    continue
+                current_section = _clean(heading.get_text())
+                current_date    = _parse_date(current_section)
+                # Description lives in a <div> or <p> sibling of the heading
+                desc_parts = [
+                    _clean(el.get_text())
+                    for el in child.find_all(["p", "div"], recursive=False)
+                    if _clean(el.get_text())
+                ]
+                _add_section(current_section,
+                             " ".join(desc_parts)[:2000])
+                sections_seen += 1
+
+            elif "sect5" in classes and current_section:
+                # Feature sub-section belonging to current_section
+                for table in child.find_all("table"):
+                    rows = table.find_all("tr")[1:]   # skip header
+                    for row in rows[:MAX_ROWS_PER_TABLE]:
+                        if len(items) >= MAX_TOTAL:
+                            break
+                        cells = row.find_all(["td", "th"])
+                        if not cells:
+                            continue
+                        feat_name = _clean(cells[0].get_text())
+                        feat_desc = (
+                            _clean(" ".join(c.get_text() for c in cells[1:]))
+                            if len(cells) > 1 else ""
+                        )
+                        _add_feature(current_section, feat_name,
+                                     feat_desc, current_date)
+
+        if items:
+            return items
+
+    # ── Fallback: h3-based flat parse (if letterstyle not found) ────────────
+    current_section = ""
+    current_date    = None
+    sections_seen   = 0
+
+    for tag in soup.find_all(["h3", "table"]):
+        if len(items) >= MAX_TOTAL:
+            break
+        if tag.name == "h3":
+            if sections_seen >= MAX_SECTIONS:
+                break
+            current_section = _clean(tag.get_text())
+            current_date    = _parse_date(current_section)
+            desc_div = tag.find_next_sibling(["p", "div"])
+            desc = _clean(desc_div.get_text()) if desc_div else ""
+            _add_section(current_section, desc)
+            sections_seen += 1
+        elif tag.name == "table" and current_section:
+            rows = tag.find_all("tr")[1:]
+            for row in rows[:MAX_ROWS_PER_TABLE]:
+                if len(items) >= MAX_TOTAL:
+                    break
+                cells = row.find_all(["td", "th"])
+                if not cells:
+                    continue
+                feat_name = _clean(cells[0].get_text())
+                feat_desc = (
+                    _clean(" ".join(c.get_text() for c in cells[1:]))
+                    if len(cells) > 1 else ""
+                )
+                _add_feature(current_section, feat_name,
+                             feat_desc, current_date)
+
+    return items
+
+
 # ── HCM-specific parsers ───────────────────────────────────────────────────────
 
 def _try_hcm_api_usage(soup: BeautifulSoup) -> list[dict]:
@@ -327,8 +471,13 @@ def parse_oracle_page(
 
     items: list[dict] = []
 
+    # OIC What's New — dedicated parser that captures both section headings
+    # (e.g. "End of Life" notices) and individual feature rows within each section
+    if category == "OIC" and doc_type == "whats_new":
+        items = _try_oic_whats_new(soup)
+
     # HCM pages have a distinct structure — use dedicated parsers first
-    if category == "HCM":
+    if not items and category == "HCM":
         if service == "REST API Usage":
             items = _try_hcm_api_usage(soup)
         elif service == "REST API":
