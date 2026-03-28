@@ -125,6 +125,30 @@ class UpdateVersion(Base):
         }
 
 
+class AnalysisCache(Base):
+    """
+    Cached AI analysis result for a specific set of update IDs.
+    Keyed by a SHA-256 hash of the sorted ID list so the same selection
+    always resolves to the same cache entry.
+    """
+
+    __tablename__ = "analysis_cache"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    ids_key     = Column(String(64), unique=True, nullable=False, index=True)
+    ids_json    = Column(Text, nullable=False)   # JSON array of sorted IDs
+    analysis    = Column(Text, nullable=False)   # Markdown text from LLM
+    generated_at = Column(DateTime, default=datetime.now)
+
+    def to_dict(self) -> dict:
+        return {
+            "ids_key":      self.ids_key,
+            "ids":          json.loads(self.ids_json),
+            "analysis":     self.analysis,
+            "generated_at": self.generated_at.isoformat() if self.generated_at else None,
+        }
+
+
 class CrawlRun(Base):
     """Audit log for each scheduler run."""
 

@@ -62,7 +62,7 @@ label{font-size:0.87rem;color:var(--text-dim)}
 .t-item.sel{background:var(--sel-bg);border-left-color:var(--accent2)}
 .t-item.isnew{color:#64b5f6}
 .t-item.hi{color:var(--red)}.t-item.me{color:var(--orange)}.t-item.lo{color:var(--green)}
-.t-item input[type=checkbox]{flex-shrink:0;accent-color:var(--accent2);cursor:pointer;width:15px;height:15px}
+.t-item input[type=radio]{flex-shrink:0;accent-color:var(--accent2);cursor:pointer;width:15px;height:15px}
 .t-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ── Detail panel ── */
@@ -180,6 +180,11 @@ input[type=checkbox]{accent-color:var(--accent2);width:15px;height:15px}
 #analysis-status{font-size:0.8rem;color:var(--text-dim)}
 .btn-analyze{background:#00695c}
 .btn-analyze:hover:not(:disabled){background:#00897b}
+.btn-regenerate{background:#5c4200}
+.btn-regenerate:hover:not(:disabled){background:#7a5800}
+.a-cache-badge{font-size:0.75rem;color:var(--text-dim);background:var(--bg-light);
+  border-left:3px solid var(--accent2);padding:4px 10px;margin-bottom:8px;border-radius:2px}
+.a-cache-new{border-left-color:#00897b;color:#80cbc4}
 /* Loading spinner */
 .a-loading{display:flex;align-items:center;gap:10px;color:var(--text-dim);padding:10px 0}
 .spinner{width:18px;height:18px;border:2px solid var(--bg-light);flex-shrink:0;
@@ -223,9 +228,7 @@ input[type=color]{width:32px;height:32px;border:1px solid #3a3f6a;border-radius:
   <!-- Conclusion button with selected-count badge -->
   <button class="btn btn-conclude" id="btn-conclude" onclick="openConclusion()" disabled>
     🔍 Conclusion
-    <span class="badge-cnt" id="sel-badge" style="display:none">0</span>
   </button>
-  <button class="btn btn-sec" onclick="clearSelection()">✕ Clear</button>
   <div class="vsep"></div>
   <label style="color:var(--text-dim)">Font Size</label>
   <select id="f-fontsize" onchange="applyFontSize(this.value)" title="Font Size">
@@ -279,14 +282,11 @@ input[type=color]{width:32px;height:32px;border:1px solid #3a3f6a;border-radius:
       </div>
     </div>
 
-    <!-- List Tab — checkboxes in first column -->
+    <!-- List Tab — radio pick in first column -->
     <div class="pane" id="pane-list">
       <table>
         <thead><tr>
-          <th style="width:30px;text-align:center">
-            <input type="checkbox" id="chk-all" title="Select all"
-                   onchange="toggleSelectAll(this.checked)">
-          </th>
+          <th style="width:30px;text-align:center"></th>
           <th style="width:46%">Title</th>
           <th>Category</th><th>Service</th>
           <th>Impact</th><th>Date</th><th>Ver</th>
@@ -325,8 +325,11 @@ input[type=color]{width:32px;height:32px;border:1px solid #3a3f6a;border-radius:
       <div id="analysis-result" style="display:none"></div>
     </div>
     <div id="modal-footer">
-      <button class="btn btn-analyze" id="btn-analyze" onclick="runAnalysis()">
+      <button class="btn btn-analyze" id="btn-analyze" onclick="runAnalysis(false)">
         🧠 Analyze Impact &amp; Upgrade Guide
+      </button>
+      <button class="btn btn-regenerate" id="btn-regenerate" onclick="runAnalysis(true)" style="display:none">
+        🔄 Regenerate
       </button>
       <span id="analysis-status"></span>
     </div>
@@ -341,7 +344,7 @@ const SI={Compute:'🖥',Networking:'🌐',Database:'🗄',Storage:'💾',
 const IC={High:'var(--red)',Medium:'var(--orange)',Low:'var(--green)'};
 
 let ALL=[], selId=null;
-let SELECTED=new Set();   // IDs checked for conclusion
+let selConclId=null;   // single ID selected for conclusion (radio pick)
 
 const $=id=>document.getElementById(id);
 const setStatus=(l,r='')=>{$('s-left').textContent='  '+l;if(r)$('s-right').textContent=r};
@@ -362,7 +365,6 @@ async function loadAll(){
     const nw=ALL.filter(u=>u.is_new).length;
     $('sidebar-meta').textContent=`${ALL.length}${nw?' · ✦'+nw:''}`;
     setStatus(`${ALL.length} updates`,nw?`✦ ${nw} new`:'');
-    updateSelBadge();
   }catch(e){setStatus('Error: '+e.message)}
 }
 
@@ -381,36 +383,14 @@ function applyFilters(){const f=getFiltered();renderTree(f);renderTable(f)}
 function doSearch(){applyFilters()}
 function filterTree(){renderTree(getFiltered())}
 
-/* ── Selection management ──────────────────────────────── */
-function toggleSelect(id, checked){
-  if(checked) SELECTED.add(id); else SELECTED.delete(id);
-  updateSelBadge();
-  // sync sidebar checkbox
-  document.querySelectorAll(`.t-item input[data-id="${id}"]`).forEach(cb=>cb.checked=checked);
-  // sync table checkbox
-  const tcb=document.querySelector(`#tbody input[data-id="${id}"]`);
-  if(tcb) tcb.checked=checked;
-}
-function toggleSelectAll(checked){
-  const visible=getFiltered();
-  visible.forEach(u=>{ if(checked) SELECTED.add(u.id); else SELECTED.delete(u.id); });
-  renderTable(visible);  // re-render to update all checkboxes
-  renderTree(visible);
-  updateSelBadge();
-}
-function clearSelection(){
-  SELECTED.clear();
-  updateSelBadge();
-  document.querySelectorAll('input[data-id]').forEach(cb=>cb.checked=false);
-  $('chk-all').checked=false;
-}
-function updateSelBadge(){
-  const n=SELECTED.size;
-  const badge=$('sel-badge');
-  const btn=$('btn-conclude');
-  badge.textContent=n;
-  badge.style.display=n?'block':'none';
-  btn.disabled=n===0;
+/* ── Selection management (radio pick — single item) ───── */
+function selectForConclusion(id){
+  selConclId=id;
+  $('btn-conclude').disabled=false;
+  // sync all radios
+  document.querySelectorAll('input[name="sel-radio"]').forEach(r=>{
+    r.checked=parseInt(r.value)===id;
+  });
 }
 
 /* ── Sidebar tree ──────────────────────────────────────── */
@@ -443,15 +423,17 @@ function renderTree(items){
           (imp==='High'?' hi':imp==='Medium'?' me':imp==='Low'?' lo':'')+
           (item.id===selId?' sel':'');
         const row=el('div',cls);
-        // checkbox
-        const cb=document.createElement('input');
-        cb.type='checkbox'; cb.dataset.id=item.id; cb.checked=SELECTED.has(item.id);
-        cb.onclick=e=>{e.stopPropagation();toggleSelect(item.id,cb.checked)};
+        row.dataset.id=item.id;
+        // radio
+        const rb=document.createElement('input');
+        rb.type='radio'; rb.name='sel-radio'; rb.value=item.id;
+        rb.checked=item.id===selConclId;
+        rb.onclick=e=>{e.stopPropagation();selectForConclusion(item.id);showDetail(item)};
         // label
         const lbl=el('span','t-label',(item.is_new?'● ':'  ')+item.title.substring(0,55));
         lbl.title=item.title;
-        row.appendChild(cb); row.appendChild(lbl);
-        row.onclick=()=>showDetail(item);
+        row.appendChild(rb); row.appendChild(lbl);
+        row.onclick=()=>{selectForConclusion(item.id);showDetail(item)};
         svcBody.appendChild(row);
       });
     });
@@ -461,6 +443,7 @@ function renderTree(items){
 /* ── Detail view ───────────────────────────────────────── */
 function showDetail(item){
   selId=item.id;
+  selectForConclusion(item.id);
   document.querySelectorAll('.t-item').forEach(e=>
     e.classList.toggle('sel',parseInt(e.dataset.id)===item.id));
   $('empty').style.display='none';
@@ -495,8 +478,8 @@ function renderTable(items){
     const ic=u.impact_level;
     const ver=u.version_count||1;
     tr.innerHTML=
-      `<td style="text-align:center"><input type="checkbox" data-id="${u.id}" ${SELECTED.has(u.id)?'checked':''}
-         onclick="toggleSelect(${u.id},this.checked)"></td>`+
+      `<td style="text-align:center"><input type="radio" name="sel-radio" value="${u.id}" ${u.id===selConclId?'checked':''}
+         onclick="selectForConclusion(${u.id})"></td>`+
       `<td title="${esc(u.title)}">${esc(u.title.substring(0,90))}</td>`+
       `<td>${u.category||''}</td><td>${u.service||''}</td>`+
       `<td class="${ic==='High'?'iH':ic==='Medium'?'iM':ic==='Low'?'iL':''}">${ic||'—'}</td>`+
@@ -557,11 +540,10 @@ async function markSeen(){
    ══════════════════════════════════════════════════════════ */
 
 async function openConclusion(){
-  if(SELECTED.size===0)return;
-  const ids=[...SELECTED].join(',');
+  if(!selConclId)return;
   setStatus('Building conclusion…');
   try{
-    const records=await api(`/conclusion?ids=${ids}`);
+    const records=await api(`/conclusion?ids=${selConclId}`);
     renderConclusion(records);
   }catch(e){setStatus('Error: '+e.message)}
 }
@@ -582,8 +564,12 @@ function renderConclusion(records){
   const ar=$('analysis-result');
   ar.style.display='none'; ar.innerHTML='';
   $('analysis-status').textContent='';
+  $('btn-analyze').textContent='🧠 Analyze Impact & Upgrade Guide';
   $('btn-analyze').disabled=false;
+  $('btn-regenerate').style.display='none';
   $('modal-overlay').classList.add('open');
+  // Auto-load cached analysis if available
+  _loadCachedAnalysis();
 
   const hasManyVersions=records.some(r=>(r.version_count||1)>1);
   const subtitle=records.length===1
@@ -749,7 +735,10 @@ function closeModal(){
   const ar=$('analysis-result');
   ar.style.display='none'; ar.innerHTML='';
   $('analysis-status').textContent='';
+  $('btn-analyze').style.display='';
   $('btn-analyze').disabled=false;
+  $('btn-regenerate').style.display='none';
+  $('btn-regenerate').disabled=false;
 }
 function closeModalOnBg(e){if(e.target===$('modal-overlay'))closeModal()}
 
@@ -792,9 +781,34 @@ function mdToHtml(md){
 /* ── Impact Analysis ─────────────────────────────────────── */
 let _analysisIds=[];   // IDs currently loaded in the modal
 
-async function runAnalysis(){
+function _showAnalysisResult(data){
+  const ar=$('analysis-result');
+  const ts=data.generated_at?new Date(data.generated_at).toLocaleString():'';
+  const badge=data.from_cache
+    ?`<div class="a-cache-badge">📋 Cached analysis · Generated ${ts}</div>`
+    :`<div class="a-cache-badge a-cache-new">✨ Freshly generated · ${ts}</div>`;
+  ar.innerHTML=badge+mdToHtml(data.analysis);
+  ar.style.display='block';
+  // Switch button state
+  $('btn-analyze').style.display='none';
+  $('btn-regenerate').style.display='';
+}
+
+async function _loadCachedAnalysis(){
   if(!_analysisIds.length)return;
-  const btn=$('btn-analyze');
+  try{
+    const data=await api('/analyze',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids:_analysisIds,force:false})
+    });
+    if(data.from_cache) _showAnalysisResult(data);
+  }catch(_){}  // silently ignore — user can still click Analyze
+}
+
+async function runAnalysis(force=false){
+  if(!_analysisIds.length)return;
+  const btn=force?$('btn-regenerate'):$('btn-analyze');
   const ar=$('analysis-result');
   btn.disabled=true;
   $('analysis-status').textContent='';
@@ -805,9 +819,9 @@ async function runAnalysis(){
     const data=await api('/analyze',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ids:_analysisIds})
+      body:JSON.stringify({ids:_analysisIds,force})
     });
-    ar.innerHTML=mdToHtml(data.analysis);
+    _showAnalysisResult(data);
   }catch(e){
     ar.innerHTML=`<p style="color:var(--red)">⚠ Analysis failed: ${esc(e.message)}</p>`;
   }finally{

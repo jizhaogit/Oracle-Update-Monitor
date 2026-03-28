@@ -15,7 +15,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from config import DATABASE_URL
-from storage.models import Base, CrawlRun, OracleUpdate, UpdateVersion
+from storage.models import AnalysisCache, Base, CrawlRun, OracleUpdate, UpdateVersion
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +42,10 @@ def init_db() -> None:
     # Columns added in v2 (version-tracking feature)
     _add_column_if_missing("oracle_updates", "title_key",     "VARCHAR(64)")
     _add_column_if_missing("oracle_updates", "version_count", "INTEGER DEFAULT 1")
-    # New table already created by create_all above (update_versions)
+    # Columns added in v3 (analysis cache feature)
+    _add_column_if_missing("analysis_cache", "ids_json",     "TEXT")
+    _add_column_if_missing("analysis_cache", "analysis",     "TEXT")
+    _add_column_if_missing("analysis_cache", "generated_at", "DATETIME")
 
     log.info("Database initialised at %s", DATABASE_URL)
 
@@ -268,6 +271,44 @@ def get_versions(update_id: int) -> list[dict]:
                   .order_by(UpdateVersion.version_num.asc())
                   .all())
     return [r.to_dict() for r in rows]
+
+
+# ── AnalysisCache CRUD ─────────────────────────────────────────────────────────
+
+def _analysis_ids_key(ids: list[int]) -> str:
+    """Stable SHA-256 key for a sorted list of update IDs."""
+    canonical = ",".join(str(i) for i in sorted(ids))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def get_analysis_cache(ids: list[int]) -> Optional[dict]:
+    """Return the cached analysis for the given ID set, or None."""
+    key = _analysis_ids_key(ids)
+    with session_scope() as s:
+        row = s.query(AnalysisCache).filter_by(ids_key=key).first()
+        return row.to_dict() if row else None
+
+
+def save_analysis_cache(ids: list[int], analysis: str) -> dict:
+    """Insert or replace the cached analysis for the given ID set."""
+    import json as _json
+    key = _analysis_ids_key(ids)
+    with session_scope() as s:
+        row = s.query(AnalysisCache).filter_by(ids_key=key).first()
+        if row:
+            row.analysis     = analysis
+            row.generated_at = datetime.now()
+            row.ids_json     = _json.dumps(sorted(ids))
+        else:
+            row = AnalysisCache(
+                ids_key      = key,
+                ids_json     = _json.dumps(sorted(ids)),
+                analysis     = analysis,
+                generated_at = datetime.now(),
+            )
+            s.add(row)
+        s.flush()
+        return row.to_dict()
 
 
 # ── CrawlRun CRUD ──────────────────────────────────────────────────────────────

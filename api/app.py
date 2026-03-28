@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 UI_HTML = Path(__file__).parent.parent / "ui" / "index.html"
 
 from storage.database import (
+    get_analysis_cache, save_analysis_cache,
     get_stats, get_update, get_updates_by_ids, get_versions,
     list_crawl_runs, list_updates,
     get_distinct_categories, get_distinct_services, mark_all_seen,
@@ -62,6 +63,7 @@ class AskRequest(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     ids: list[int]
+    force: bool = False   # True = regenerate even if cached
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -181,15 +183,48 @@ def ask_question(body: AskRequest):
 def analyze_updates(body: AnalyzeRequest):
     """
     Analyze selected updates and return Markdown upgrade guidance.
+    Returns cached result if available unless force=True is passed.
     Uses LLM if configured; falls back to rule-based keyword analysis.
     """
     if not body.ids:
         raise HTTPException(status_code=400, detail="No IDs provided")
+
+    # Return cached analysis unless the caller requests a fresh one
+    if not body.force:
+        try:
+            cached = get_analysis_cache(body.ids)
+        except Exception as exc:
+            log.warning("Cache read failed: %s", exc)
+            cached = None
+        if cached:
+            return {
+                "ids":          body.ids,
+                "count":        len(body.ids),
+                "analysis":     cached["analysis"],
+                "from_cache":   True,
+                "generated_at": cached["generated_at"],
+            }
+
     records = get_updates_by_ids(body.ids)
     if not records:
         raise HTTPException(status_code=404, detail="No updates found for given IDs")
     analysis = analyze_impact(records)
-    return {"ids": body.ids, "count": len(records), "analysis": analysis}
+
+    # Persist for future requests (best-effort — never block on cache failure)
+    generated_at = None
+    try:
+        saved = save_analysis_cache(body.ids, analysis)
+        generated_at = saved["generated_at"]
+    except Exception as exc:
+        log.warning("Cache write failed: %s", exc)
+
+    return {
+        "ids":          body.ids,
+        "count":        len(records),
+        "analysis":     analysis,
+        "from_cache":   False,
+        "generated_at": generated_at,
+    }
 
 
 @app.get("/updates/{update_id}/versions")
