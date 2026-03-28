@@ -88,7 +88,7 @@ The tool is distributed as a **portable green package** — copy the folder to a
 ## Architecture Overview
 
 ```
-oracle_monitor/
+<project-folder>/
 ├── run.bat               ← launcher (downloads Python runtime automatically)
 ├── main.py               ← entry point
 ├── config.py             ← all settings (env vars / .env file)
@@ -133,7 +133,7 @@ Oracle Docs → fetcher → parser → classifier → database
 
 No Python installation required.
 
-1. **Download or copy** the `oracle_monitor` folder to any location on your Windows machine.
+1. **Download or copy** the project folder to any location on your Windows machine.
 2. **Double-click `run.bat`**.
    - On first run it downloads the Python 3.11 embeddable runtime (~8 MB) and installs packages (~300 MB). This takes a few minutes.
    - On subsequent runs it starts in seconds.
@@ -144,7 +144,7 @@ No Python installation required.
 If you already have Python 3.10+ installed:
 
 ```bat
-cd oracle_monitor
+cd <project-folder>
 python -m pip install -r requirements-core.txt
 python main.py
 ```
@@ -404,7 +404,7 @@ The server stays running until you press `Ctrl+C`. Access the UI from any browse
 ## Project Structure
 
 ```
-oracle_monitor/
+<project-folder>/
 ├── .env.example            ← configuration template (safe to commit)
 ├── .gitignore
 ├── README.md
@@ -465,7 +465,7 @@ oracle_monitor/
 
 **Browser shows "This site can't be reached"**
 - Wait 10–15 seconds after launching `run.bat` for the server to bind.
-- Check `logs/oracle_monitor.log` for startup errors.
+- Check `logs/oracle_monitor.log` for startup errors (inside your project folder).
 
 **No updates appear after first launch**
 - The first crawl runs automatically on startup. It may take 1–2 minutes.
@@ -477,7 +477,7 @@ oracle_monitor/
 
 **Crawl returns 0 results from live Oracle pages**
 - Oracle's pages may have changed their HTML structure. The parser tries three strategies; if all fail, mock data is used.
-- Check `logs/oracle_monitor.log` for parser warnings.
+- Check `logs/oracle_monitor.log` for parser warnings (inside your project folder).
 
 **LLM features not working**
 - Set `LLM_PROVIDER=none` in `.env` to disable LLM and use the built-in rule-based classifier, which always works without any API key.
@@ -488,7 +488,7 @@ oracle_monitor/
 
 **AI Impact Analysis returns HTTP 500**
 - This can happen if the database was created before the analysis cache table was added. Restart `run.bat` — `init_db` will automatically add any missing columns on startup.
-- Check `logs/oracle_monitor.log` for `Cache read/write failed` warnings.
+- Check `logs/oracle_monitor.log` for `Cache read/write failed` warnings (inside your project folder).
 
 **Want to reset all data**
 - Stop the server.
