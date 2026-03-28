@@ -16,9 +16,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from config import CRAWL_INTERVAL_HOURS, CRAWL_ON_STARTUP, ORACLE_SOURCES
 from crawler.fetcher import fetch_page
 from crawler.parser import get_mock_records, parse_oracle_page
-from processor.classifier import classify
-from processor.summarizer import add_to_vectorstore, generate_summary
-from storage.database import finish_crawl_run, start_crawl_run, upsert_update
+from processor.classifier import rule_classify as classify
+from processor.summarizer import rule_based_summary
+from storage.database import finish_crawl_run, get_cached_classification, start_crawl_run, upsert_update
 from storage.file_store import save_raw_page
 
 log = logging.getLogger(__name__)
@@ -77,21 +77,21 @@ def run_crawl(seed_mock: bool = True) -> dict:
         log.info("  %s → %d items parsed", source_name, len(records))
 
         for rec in records:
-            # Classify before storing
-            rec = classify(rec)
+            # Reuse stored classification for already-known records (avoids LLM calls)
+            if not rec.get("impact_level"):
+                cached = get_cached_classification(source_name, rec["title"])
+                if cached:
+                    rec.update(cached)
+            # Only call LLM for truly new records with no classification yet
+            if not rec.get("impact_level"):
+                rec = classify(rec)
             if not rec.get("summary"):
-                rec["summary"] = generate_summary(rec["title"], rec["content"])
+                rec["summary"] = rule_based_summary(rec["title"], rec["content"])
 
             stored, is_new = upsert_update(rec)
             total_found += 1
             if is_new:
                 total_new += 1
-                # Add to vector store for semantic search
-                add_to_vectorstore(
-                    stored["id"], stored["title"], stored["content"],
-                    {"category": stored["category"], "service": stored["service"],
-                     "impact_level": stored["impact_level"]}
-                )
 
     # ── Mock/seed fallback ─────────────────────────────────────────────────────
     if not any_real and seed_mock:
@@ -100,17 +100,12 @@ def run_crawl(seed_mock: bool = True) -> dict:
         for rec in mock_records:
             rec = classify(rec)
             if not rec.get("summary"):
-                rec["summary"] = generate_summary(rec["title"], rec["content"])
+                rec["summary"] = rule_based_summary(rec["title"], rec["content"])
 
             stored, is_new = upsert_update(rec)
             total_found += 1
             if is_new:
                 total_new += 1
-                add_to_vectorstore(
-                    stored["id"], stored["title"], stored["content"],
-                    {"category": stored["category"], "service": stored["service"],
-                     "impact_level": stored["impact_level"]}
-                )
 
     finish_crawl_run(run_id, sources_done, total_found, total_new, "success")
     log.info("Crawl finished: %d found, %d new", total_found, total_new)

@@ -21,6 +21,7 @@ from config import (
     ANTHROPIC_API_KEY, ANTHROPIC_MODEL,
     BEDROCK_MODEL_ID, BEDROCK_REGION, BEDROCK_PROFILE,
     OLLAMA_BASE_URL, OLLAMA_MODEL,
+    LLM_TIMEOUT,
 )
 
 log = logging.getLogger(__name__)
@@ -162,34 +163,49 @@ def _get_chain():
 def llm_classify(record: dict) -> dict:
     """
     Use LangChain LLM to enrich a record with impact_level, tags, and summary.
-    Falls back to rule-based on any error.
+    Falls back to rule-based if LLM_TIMEOUT seconds elapse or any error occurs.
+    Uses a daemon thread so a slow LLM never blocks the crawl indefinitely.
     """
+    import threading
+
     chain = _get_chain()
     if chain is None:
         return rule_classify(record)
 
-    try:
-        raw = chain.invoke({
-            "title":    record.get("title", ""),
-            "service":  record.get("service", ""),
-            "category": record.get("category", ""),
-            "content":  record.get("content", "")[:1500],
-        })
-        # strip any accidental markdown code fences
-        raw = re.sub(r"```json|```", "", raw).strip()
-        parsed = json.loads(raw)
+    bucket: dict = {}
 
+    def _invoke():
+        try:
+            raw = chain.invoke({
+                "title":    record.get("title", ""),
+                "service":  record.get("service", ""),
+                "category": record.get("category", ""),
+                "content":  record.get("content", "")[:1500],
+            })
+            raw = re.sub(r"```json|```", "", raw).strip()
+            bucket["parsed"] = json.loads(raw)
+        except Exception as exc:
+            bucket["error"] = str(exc)
+
+    t = threading.Thread(target=_invoke, daemon=True)
+    t.start()
+    t.join(timeout=LLM_TIMEOUT)
+
+    if "parsed" in bucket:
+        parsed = bucket["parsed"]
         record["impact_level"] = parsed.get("impact_level", "Low")
         record["tags"]         = parsed.get("tags", [])
         if parsed.get("summary"):
             record["summary"]  = parsed["summary"]
-
         log.debug("LLM classified: %s → %s", record["title"][:60], record["impact_level"])
         return record
 
-    except Exception as exc:
-        log.warning("LLM classification failed (%s), using rule-based", exc)
-        return rule_classify(record)
+    if "error" in bucket:
+        log.warning("LLM classification failed (%s), using rule-based", bucket["error"])
+    else:
+        log.warning("LLM classify timeout (%ds) for '%s' — using rule-based",
+                    LLM_TIMEOUT, record.get("title", "")[:50])
+    return rule_classify(record)
 
 
 def classify(record: dict) -> dict:

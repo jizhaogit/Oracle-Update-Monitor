@@ -7,11 +7,12 @@ An intelligent, self-contained tool for tracking Oracle Cloud Infrastructure (OC
 ## Table of Contents
 
 1. [Introduction](#introduction)
-2. [Key Features](#key-features)
-3. [Architecture Overview](#architecture-overview)
-4. [Quick Start](#quick-start)
-5. [Configuration](#configuration)
-6. [Using the UI](#using-the-ui)
+2. [Monitored Sources](#monitored-sources)
+3. [Key Features](#key-features)
+4. [Architecture Overview](#architecture-overview)
+5. [Quick Start](#quick-start)
+6. [Configuration](#configuration)
+7. [Using the UI](#using-the-ui)
    - [Toolbar](#toolbar)
    - [Sidebar](#sidebar)
    - [Detail View](#detail-view)
@@ -20,10 +21,10 @@ An intelligent, self-contained tool for tracking Oracle Cloud Infrastructure (OC
    - [Conclusion (Comparison) Modal](#conclusion-comparison-modal)
    - [AI Impact Analysis](#ai-impact-analysis)
    - [Appearance Settings](#appearance-settings)
-7. [REST API Reference](#rest-api-reference)
-8. [Command-Line Options](#command-line-options)
-9. [Project Structure](#project-structure)
-10. [Dependencies](#dependencies)
+8. [REST API Reference](#rest-api-reference)
+9. [Command-Line Options](#command-line-options)
+10. [Project Structure](#project-structure)
+11. [Dependencies](#dependencies)
 11. [Troubleshooting](#troubleshooting)
 
 ---
@@ -32,9 +33,9 @@ An intelligent, self-contained tool for tracking Oracle Cloud Infrastructure (OC
 
 Oracle regularly publishes updates to its cloud services across dozens of product pages. Keeping track of what changed, when, and how it affects your environment is time-consuming when done manually.
 
-**Oracle OCI/OIC Monitor** automates this by:
+**Oracle OCI/OIC/HCM Monitor** automates this by:
 
-- Crawling 11 official Oracle documentation pages on a configurable schedule (default: every 24 hours)
+- Crawling 13 official Oracle documentation pages on a configurable schedule (default: every 24 hours)
 - Detecting new entries and content changes between crawls
 - Archiving previous versions of any changed document
 - Classifying each update by impact level (High / Medium / Low) and extracting relevant tags
@@ -43,6 +44,28 @@ Oracle regularly publishes updates to its cloud services across dozens of produc
 - Exposing everything through a browser-based UI and a REST API
 
 The tool is distributed as a **portable green package** — copy the folder to any Windows machine and double-click `run.bat`. No pre-installed Python or dependencies are required.
+
+---
+
+## Monitored Sources
+
+| # | Category | Source Name | Type | URL |
+|---|---|---|---|---|
+| 1 | ☁ OCI | What's New | What's New | [servicechanges.htm](https://docs.oracle.com/en-us/iaas/Content/servicechanges.htm) |
+| 2 | ☁ OCI | Release Notes (All) | Release Notes | [releasenotes/](https://docs.oracle.com/en-us/iaas/releasenotes/) |
+| 3 | ☁ OCI | Compute | Release Notes | [releasenotes/changes/compute/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/compute/) |
+| 4 | ☁ OCI | Networking | Release Notes | [releasenotes/changes/network/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/network/) |
+| 5 | ☁ OCI | Database | Release Notes | [releasenotes/changes/database/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/database/) |
+| 6 | ☁ OCI | Storage | Release Notes | [releasenotes/changes/storage/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/storage/) |
+| 7 | ☁ OCI | Security | Release Notes | [releasenotes/changes/security/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/security/) |
+| 8 | ☁ OCI | Analytics | Release Notes | [releasenotes/changes/analytics/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/analytics/) |
+| 9 | ☁ OCI | Containers & Kubernetes | Release Notes | [releasenotes/changes/containers/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/containers/) |
+| 10 | 🔗 OIC | What's New | What's New | [integration-cloud/whats-new/](https://docs.oracle.com/en/cloud/paas/integration-cloud/whats-new/) |
+| 11 | 🔗 OIC | Release Notes | Release Notes | [integration-cloud/release-notes/](https://docs.oracle.com/en/cloud/paas/integration-cloud/release-notes/) |
+| 12 | 👤 HCM | What's New | What's New | [saas/readiness/hcm.html](https://docs.oracle.com/en/cloud/saas/readiness/hcm.html) |
+| 13 | 👤 HCM | REST API Endpoints | Release Notes | [human-resources/farws/rest-endpoints.html](https://docs.oracle.com/en/cloud/saas/human-resources/farws/rest-endpoints.html) |
+
+> Sources are defined in `config.py` (`ORACLE_SOURCES`) and can be extended with additional Oracle documentation URLs without any code changes.
 
 ---
 

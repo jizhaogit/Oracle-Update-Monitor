@@ -48,7 +48,8 @@ def _fmt_updates(updates: list[dict]) -> str:
 
 
 def _llm_analyze(updates: list[dict]) -> str | None:
-    """Call the configured LLM to produce structured upgrade guidance."""
+    """Call the configured LLM to produce structured upgrade guidance.
+    Runs as a blocking call — callers must run this in a background thread if needed."""
     try:
         from processor.classifier import _get_llm
         from langchain_core.messages import HumanMessage, SystemMessage
@@ -86,14 +87,11 @@ def _llm_analyze(updates: list[dict]) -> str | None:
             f"guidance my team can act on today:\n\n{_fmt_updates(updates)}"
         )
 
-        response = llm.invoke([
-            SystemMessage(content=system),
-            HumanMessage(content=user),
-        ])
-        return response.content.strip()
+        resp = llm.invoke([SystemMessage(content=system), HumanMessage(content=user)])
+        return resp.content.strip()
 
     except Exception as exc:
-        log.warning("LLM impact analysis failed (%s): %s", LLM_PROVIDER, exc, exc_info=True)
+        log.warning("LLM impact analysis failed (%s): %s", LLM_PROVIDER, exc)
         return None
 
 
@@ -107,11 +105,11 @@ def _llm_status_note() -> str:
         )
     if LLM_PROVIDER == "ollama":
         return (
-            f"> **Note:** Ollama is configured but could not be reached at "
-            f"`{OLLAMA_BASE_URL}`. "
-            "Make sure Ollama is installed and running (`ollama serve`), "
-            f"and that the model is downloaded (`ollama pull {OLLAMA_MODEL}`). "
-            "Then restart the app."
+            f"> **Note:** Ollama is configured (`{OLLAMA_MODEL}` at `{OLLAMA_BASE_URL}`) "
+            "but the analysis timed out or could not be reached. "
+            "Make sure Ollama is running (`ollama serve`) and the model is downloaded "
+            f"(`ollama pull {OLLAMA_MODEL}`). "
+            "You can also increase `LLM_TIMEOUT` in `.env` for slower machines."
         )
     if LLM_PROVIDER == "anthropic":
         return (
@@ -130,9 +128,9 @@ def _llm_status_note() -> str:
 def _rule_based_analyze(updates: list[dict]) -> str:
     """
     Keyword-driven fallback analysis — always available without an LLM.
-    Produces a Markdown report for each update.
+    Produces a Markdown report specific to each update's actual content.
     """
-    note = _llm_status_note()
+    llm_note = _llm_status_note()
     sections = []
 
     for i, u in enumerate(updates, 1):
@@ -140,52 +138,65 @@ def _rule_based_analyze(updates: list[dict]) -> str:
         category   = u.get("category") or ""
         service    = u.get("service") or ""
         impact     = (u.get("impact_level") or "").lower()
-        blob       = " ".join([
-            title,
-            u.get("summary") or "",
-            u.get("content") or "",
-        ]).lower()
+        summary    = u.get("summary") or ""
+        content    = u.get("content") or ""
+        tags       = u.get("tags") or []
+        source_url = u.get("source_url") or ""
+
+        blob = f"{title} {summary} {content}".lower()
 
         action_hits = [kw for kw in _ACTION_KEYWORDS if kw in blob]
         info_hits   = [kw for kw in _INFO_KEYWORDS   if kw in blob]
 
+        # Content excerpt — first 400 chars of meaningful content
+        excerpt = (summary or content)[:400].strip()
+        if excerpt:
+            excerpt_block = f"\n> {excerpt}\n"
+        else:
+            excerpt_block = ""
+
+        tag_line = f"**Tags:** {', '.join(tags)}\n\n" if tags else ""
+        link_line = f"**Reference:** [{source_url}]({source_url})\n\n" if source_url else ""
+
         if action_hits or impact == "high":
-            kw_list = ", ".join(f'`{k}`' for k in action_hits[:4])
-            note    = f"Detected signal(s): {kw_list}.\n\n" if kw_list else ""
+            kw_list = ", ".join(f"`{k}`" for k in action_hits[:4])
+            signal_line = f"**Detected signals:** {kw_list}\n\n" if kw_list else ""
             body = (
                 f"**Action Required: Yes**\n\n"
-                f"{note}"
-                "This update may contain breaking changes or require migration steps. "
-                "Recommended actions:\n\n"
-                "1. Read the full content carefully and identify any deprecated or "
-                "removed API endpoints, SDK methods, or configuration keys.\n"
-                "2. Search your codebase for affected API calls, client libraries, "
-                "or configuration settings.\n"
-                "3. Reproduce the integration in a non-production environment and "
-                "validate it against the new behaviour.\n"
-                "4. Update endpoint URLs, authentication tokens, or request/response "
-                "schemas as described in the update.\n"
-                "5. Deploy to production before any stated deadline.\n\n"
-                f"{note}"
+                f"{signal_line}"
+                f"{tag_line}"
+                f"{excerpt_block}\n"
+                f"{link_line}"
+                f"**Recommended steps for `{title}`:**\n\n"
+                f"1. Review the full update at the reference link above.\n"
+                f"2. Search your codebase for references to **{service}** "
+                f"{'APIs, SDK calls, or endpoints' if 'api' in blob or 'endpoint' in blob or 'sdk' in blob else 'configuration or integration points'} "
+                f"related to `{title}`.\n"
+                f"3. Test your {category} integration in a non-production environment.\n"
+                f"4. Apply any schema, endpoint, or configuration changes described in the update.\n"
+                f"5. {'Deploy before any stated deadline.' if any(w in blob for w in ['deadline', 'by ', 'before ', 'migrate by']) else 'Monitor for issues after deployment.'}\n"
             )
 
         elif info_hits or impact in ("low", "medium"):
             body = (
-                "**No action needed.**\n\n"
-                "This update appears to introduce a new feature, enhancement, or "
-                "informational notice that is backward-compatible. Existing integrations "
-                "should continue to work without modification.\n\n"
-                "You may optionally explore the new capability at your own pace.\n\n"
-                f"{note}"
+                f"**No action needed.**\n\n"
+                f"{tag_line}"
+                f"{excerpt_block}\n"
+                f"{link_line}"
+                f"This `{service}` update is backward-compatible "
+                f"({'a new feature' if any(w in blob for w in ['new feature', 'new service', 'added']) else 'an enhancement or informational notice'}). "
+                f"Existing {category} integrations should continue working without modification.\n\n"
+                f"You may optionally explore the new capability at your own pace.\n"
             )
 
         else:
             body = (
-                "**N/A**\n\n"
-                "Insufficient information to determine impact automatically. "
-                "Please review the full content of this update to decide whether "
-                "any changes are required in your environment.\n\n"
-                f"{note}"
+                f"**Review Required**\n\n"
+                f"{tag_line}"
+                f"{excerpt_block}\n"
+                f"{link_line}"
+                f"Unable to determine impact automatically for `{title}`. "
+                f"Please review the full content to decide whether changes are needed in your {category} integration.\n"
             )
 
         sections.append(
@@ -196,11 +207,12 @@ def _rule_based_analyze(updates: list[dict]) -> str:
 
     header = (
         "## Impact Analysis & Upgrade Guide\n\n"
-        "> *Rule-based analysis (keyword matching only). "
-        "See the note at the bottom of each item for how to enable AI analysis.*\n\n"
+        "> *Rule-based analysis — content-specific per update. "
+        "Configure an LLM provider in `.env` for AI-generated code-level guidance.*\n\n"
         "---\n\n"
     )
-    return header + "\n\n---\n\n".join(sections)
+    footer = f"\n\n---\n\n{llm_note}" if llm_note.strip() else ""
+    return header + "\n\n---\n\n".join(sections) + footer
 
 
 def analyze_impact(updates: list[dict]) -> str:

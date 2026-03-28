@@ -133,6 +133,85 @@ def _generic_heading_parse(soup: BeautifulSoup) -> list[dict]:
     return items
 
 
+# ── HCM-specific parsers ───────────────────────────────────────────────────────
+
+def _try_hcm_rest_endpoints(soup: BeautifulSoup) -> list[dict]:
+    """
+    Parse Oracle HCM REST API endpoint pages.
+    Structure: <dl> containing <dt><a>Operation name</a></dt><dd>Method + Path</dd>
+
+    impact_level and summary are derived here (no LLM needed — content is
+    already fully structured as Method + Path).
+    """
+    _skip = {"get action not supported", "post action not supported",
+             "patch action not supported", "delete action not supported"}
+    _method_impact = {"get": "Low", "delete": "High"}   # default Medium for others
+
+    items: list[dict] = []
+    seen: set[str] = set()
+    for dt in soup.find_all("dt")[:500]:
+        a = dt.find("a")
+        title = _clean(a.get_text() if a else dt.get_text())
+        if len(title) < 3 or title.lower() in _skip:
+            continue
+        dd = dt.find_next_sibling("dd")
+        content = _clean(dd.get_text(separator=" ")) if dd else ""
+        key = title.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        # Derive HTTP method and impact without calling an LLM
+        method_match = re.search(r"Method:\s*(\w+)", content, re.I)
+        method = method_match.group(1).lower() if method_match else ""
+        impact = _method_impact.get(method, "Medium")
+        summary = f"{method.upper()} endpoint — {title}" if method else title
+
+        items.append({
+            "title":        title,
+            "content":      content or title,
+            "release_date": None,
+            "impact_level": impact,
+            "summary":      summary,
+        })
+    return items
+
+
+def _try_hcm_readiness(soup: BeautifulSoup) -> list[dict]:
+    """
+    Parse Oracle HCM Readiness hub pages.
+    Structure: <h3>Module What's New XX</h3> followed by <p><a href="..."> links.
+    The hub page is JS-rendered so actual section content may be sparse;
+    we extract every heading + its following description paragraph as one entry.
+    """
+    items: list[dict] = []
+    for heading in soup.find_all(["h2", "h3", "h4"])[:150]:
+        title = _clean(heading.get_text())
+        # Skip navigation / boilerplate headings
+        if len(title) < 8 or title.lower() in ("contents", "overview", "search"):
+            continue
+        parts: list[str] = []
+        links: list[str] = []
+        for sib in heading.next_siblings:
+            if not isinstance(sib, Tag):
+                continue
+            if sib.name in ("h2", "h3", "h4"):
+                break
+            text = _clean(sib.get_text())
+            if text:
+                parts.append(text)
+            for a in sib.find_all("a", href=True):
+                href = a["href"]
+                if href.startswith("http") or href.endswith(".html"):
+                    links.append(href)
+        content = " ".join(parts)
+        if links:
+            content = (content + " — Links: " + ", ".join(links[:3])).strip(" —")
+        date = _parse_date(content) or _parse_date(title)
+        items.append({"title": title, "content": content or title, "release_date": date})
+    return items
+
+
 def parse_oracle_page(
     html: str,
     source_name: str,
@@ -156,9 +235,17 @@ def parse_oracle_page(
 
     items: list[dict] = []
 
-    # Try parsers in order of specificity
-    if doc_type == "release_notes":
-        items = _try_oracle_release_notes(soup)
+    # HCM pages have a distinct structure — use dedicated parsers first
+    if category == "HCM":
+        if service == "REST API":
+            items = _try_hcm_rest_endpoints(soup)
+        if not items:
+            items = _try_hcm_readiness(soup)
+
+    # Standard OCI / OIC parser chain
+    if not items:
+        if doc_type == "release_notes":
+            items = _try_oracle_release_notes(soup)
     if not items:
         items = _try_whats_new_list(soup)
     if not items:
@@ -185,9 +272,9 @@ def parse_oracle_page(
             "doc_type":     doc_type,
             "title":        title[:480],
             "content":      content,
-            "summary":      None,          # filled by processor
+            "summary":      item.get("summary"),      # pre-filled by some parsers
             "_tags":        "[]",
-            "impact_level": None,          # filled by processor
+            "impact_level": item.get("impact_level"), # pre-filled by some parsers
             "release_date": item.get("release_date"),
             "content_hash": _make_hash(title, content, source_url),
             "is_new":       True,
@@ -374,6 +461,75 @@ MOCK_UPDATES: list[dict] = [
         "release_date": datetime(2024, 1, 25),
         "impact_level": "Medium",
         "_tags":        '["Analytics", "GenAI", "OAC", "New Feature"]',
+    },
+    {
+        "source_name":  "HCM — REST API Endpoints",
+        "source_url":   "https://docs.oracle.com/en/cloud/saas/human-resources/farws/rest-endpoints.html",
+        "category":     "HCM",
+        "service":      "REST API",
+        "doc_type":     "release_notes",
+        "title":        "Get all absence records",
+        "content":      (
+            "Method: GET  Path: /hcmRestApi/resources/11.13.18.05/absences — "
+            "Returns a collection of absence records. Supports query parameters for filtering "
+            "by worker, absence type, start date, and end date. "
+            "Response includes absence dates, duration, approval status, and associated payroll information."
+        ),
+        "release_date": datetime(2024, 1, 1),
+        "impact_level": "Low",
+        "_tags":        '["HCM", "REST API", "Absences", "GET"]',
+    },
+    {
+        "source_name":  "HCM — REST API Endpoints",
+        "source_url":   "https://docs.oracle.com/en/cloud/saas/human-resources/farws/rest-endpoints.html",
+        "category":     "HCM",
+        "service":      "REST API",
+        "doc_type":     "release_notes",
+        "title":        "Get a worker",
+        "content":      (
+            "Method: GET  Path: /hcmRestApi/resources/11.13.18.05/workers/{WorkerNumber} — "
+            "Returns details for a specific worker including person information, assignment details, "
+            "employment terms, salary, and legislative data. "
+            "Supports expand parameters for related resources such as assignments, contracts, and roles."
+        ),
+        "release_date": datetime(2024, 1, 1),
+        "impact_level": "Low",
+        "_tags":        '["HCM", "REST API", "Workers", "GET"]',
+    },
+    {
+        "source_name":  "HCM — What's New",
+        "source_url":   "https://docs.oracle.com/en/cloud/saas/readiness/hcm.html",
+        "category":     "HCM",
+        "service":      "Human Capital Management",
+        "doc_type":     "whats_new",
+        "title":        "HCM — Payroll What's New 26A",
+        "content":      (
+            "Oracle Fusion Cloud Payroll 26A introduces enhancements to payroll processing, "
+            "including improved balance calculation performance, new payroll flow pattern templates, "
+            "and enhanced retroactive pay handling. "
+            "The release also adds support for additional legislative data groups and "
+            "improved integration with Oracle Time and Labor."
+        ),
+        "release_date": datetime(2026, 1, 1),
+        "impact_level": "Medium",
+        "_tags":        '["HCM", "Payroll", "Whats New"]',
+    },
+    {
+        "source_name":  "HCM — What's New",
+        "source_url":   "https://docs.oracle.com/en/cloud/saas/readiness/hcm.html",
+        "category":     "HCM",
+        "service":      "Human Capital Management",
+        "doc_type":     "whats_new",
+        "title":        "HCM — Talent Management What's New 26A",
+        "content":      (
+            "Oracle Fusion Cloud Talent Management 26A adds AI-powered skills recommendations, "
+            "enhanced goal alignment across teams, and a redesigned performance document experience. "
+            "New REST APIs are available for skills inventory, development goals, and talent profiles. "
+            "The check-in feature now supports structured templates and manager dashboards."
+        ),
+        "release_date": datetime(2026, 1, 1),
+        "impact_level": "Medium",
+        "_tags":        '["HCM", "Talent Management", "Whats New", "AI"]',
     },
     {
         "source_name":  "OCI — What's New",

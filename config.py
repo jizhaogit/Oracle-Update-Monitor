@@ -22,7 +22,7 @@ VECTOR_DIR = DATA_DIR / "vectors"
 RAW_DIR    = DATA_DIR / "raw"
 LOGS_DIR   = BASE_DIR / "logs"
 
-for _d in [DATA_DIR, DB_DIR, FILES_DIR, VECTOR_DIR, RAW_DIR, LOGS_DIR]:
+for _d in [DATA_DIR, DB_DIR, FILES_DIR, RAW_DIR, LOGS_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # ── Database ───────────────────────────────────────────────────────────────────
@@ -31,6 +31,19 @@ DATABASE_URL = f"sqlite:///{DB_DIR}/oracle_monitor.db"
 # ── Oracle URLs to monitor ─────────────────────────────────────────────────────
 # Each entry: display_name → {url, category, service, type}
 ORACLE_SOURCES: dict[str, dict] = {
+    # HCM first — REST API records are pre-classified (no LLM), so they store quickly
+    "HCM — What's New": {
+        "url": "https://docs.oracle.com/en/cloud/saas/readiness/hcm.html",
+        "category": "HCM",
+        "service": "Human Capital Management",
+        "doc_type": "whats_new",
+    },
+    "HCM — REST API Endpoints": {
+        "url": "https://docs.oracle.com/en/cloud/saas/human-resources/farws/rest-endpoints.html",
+        "category": "HCM",
+        "service": "REST API",
+        "doc_type": "release_notes",
+    },
     "OCI — What's New": {
         "url": "https://docs.oracle.com/en-us/iaas/Content/servicechanges.htm",
         "category": "OCI",
@@ -161,8 +174,14 @@ BEDROCK_PROFILE     = os.getenv("BEDROCK_PROFILE", "")   # AWS SSO profile name 
 OLLAMA_BASE_URL     = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL        = os.getenv("OLLAMA_MODEL", "llama2")
 
+# Embeddings (kept for summarizer.py compatibility — vector search is disabled)
 EMBEDDINGS_PROVIDER = os.getenv("EMBEDDINGS_PROVIDER", "huggingface")
 EMBEDDINGS_MODEL    = os.getenv("EMBEDDINGS_MODEL", "all-MiniLM-L6-v2")
+
+# Max seconds for a single LLM classification call (crawl) before falling back to rule-based
+LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "15"))
+# Max seconds for a full LLM impact analysis (Analyze button) — needs more time than classify
+LLM_ANALYZE_TIMEOUT = int(os.getenv("LLM_ANALYZE_TIMEOUT", "120"))
 
 # ── Scheduler ──────────────────────────────────────────────────────────────────
 CRAWL_INTERVAL_HOURS = int(os.getenv("CRAWL_INTERVAL_HOURS", "24"))

@@ -21,9 +21,6 @@ body{background:var(--bg-dark);color:var(--text);font-family:'Segoe UI',system-u
 #toolbar{background:var(--bg-mid);padding:9px 16px;display:flex;align-items:center;
   gap:8px;border-bottom:1px solid var(--bg-light);flex-shrink:0;flex-wrap:wrap}
 #toolbar h1{color:var(--accent);font-size:1.07rem;font-weight:700;white-space:nowrap;margin-right:8px}
-#search-box{background:var(--bg-light);border:1px solid #3a3f6a;color:var(--text);
-  padding:6px 12px;border-radius:4px;font-size:0.93rem;width:260px}
-#search-box:focus{outline:none;border-color:var(--accent2)}
 .btn{background:var(--accent);color:#fff;border:none;padding:6px 14px;border-radius:4px;
   cursor:pointer;font-size:0.93rem;font-weight:700;white-space:nowrap;transition:background .15s}
 .btn:hover{background:#a83626}
@@ -174,6 +171,10 @@ input[type=checkbox]{accent-color:var(--accent2);width:15px;height:15px}
 #analysis-result li{margin:5px 0}
 #analysis-result strong{color:var(--text);font-weight:700}
 #analysis-result code{background:var(--bg-light);padding:1px 6px;border-radius:3px;font-family:monospace;font-size:0.87rem}
+#analysis-result table{border-collapse:collapse;width:100%;margin:12px 0;font-size:0.85rem}
+#analysis-result th,#analysis-result td{border:1px solid var(--bg-light);padding:7px 12px;text-align:left;vertical-align:top}
+#analysis-result th{background:var(--bg-mid);color:var(--accent);font-weight:700;white-space:nowrap}
+#analysis-result tr:nth-child(even) td{background:var(--bg-mid)}
 /* Modal footer */
 #modal-footer{padding:10px 20px;border-top:1px solid var(--bg-light);flex-shrink:0;
   display:flex;align-items:center;gap:12px;background:var(--bg-mid)}
@@ -207,13 +208,10 @@ input[type=color]{width:32px;height:32px;border:1px solid #3a3f6a;border-radius:
 <!-- Toolbar -->
 <div id="toolbar">
   <h1>☁ Oracle OCI / OIC Monitor</h1>
-  <input id="search-box" type="text" placeholder="🔍 Search updates…"
-         onkeydown="if(event.key==='Enter')doSearch()">
-  <button class="btn" onclick="doSearch()">Search</button>
   <div class="vsep"></div>
   <label style="color:var(--text-dim)">Category</label>
   <select id="f-cat" onchange="applyFilters()">
-    <option value="">All</option><option value="OCI">OCI</option><option value="OIC">OIC</option>
+    <option value="">All</option><option value="OCI">OCI</option><option value="OIC">OIC</option><option value="HCM">HCM</option>
   </select>
   <label style="color:var(--text-dim)">Impact</label>
   <select id="f-imp" onchange="applyFilters()">
@@ -338,7 +336,7 @@ input[type=color]{width:32px;height:32px;border:1px solid #3a3f6a;border-radius:
 
 <script>
 'use strict';
-const CI={OCI:'☁',OIC:'🔗'};
+const CI={OCI:'☁',OIC:'🔗',HCM:'👤'};
 const SI={Compute:'🖥',Networking:'🌐',Database:'🗄',Storage:'💾',
           Security:'🔒',Analytics:'📊',Containers:'📦',Integration:'🔗',General:'📋'};
 const IC={High:'var(--red)',Medium:'var(--orange)',Low:'var(--green)'};
@@ -359,7 +357,7 @@ async function api(path,opts={}){
 async function loadAll(){
   setStatus('Loading…');
   try{
-    const [updates,stats]=await Promise.all([api('/updates?limit=500'),api('/stats')]);
+    const [updates,stats]=await Promise.all([api('/updates?limit=5000'),api('/stats')]);
     ALL=updates;
     renderTree(ALL);renderTable(ALL);renderStats(stats);
     const nw=ALL.filter(u=>u.is_new).length;
@@ -370,17 +368,14 @@ async function loadAll(){
 
 /* ── Filters ───────────────────────────────────────────── */
 function getFiltered(){
-  const cat=$('f-cat').value,imp=$('f-imp').value;
-  const q=$('search-box').value.toLowerCase().trim();
+  const cat=$('f-cat').value, imp=$('f-imp').value;
   return ALL.filter(u=>{
     if(cat&&u.category!==cat)return false;
     if(imp&&u.impact_level!==imp)return false;
-    if(q&&!(u.title+u.content+(u.summary||'')).toLowerCase().includes(q))return false;
     return true;
   });
 }
 function applyFilters(){const f=getFiltered();renderTree(f);renderTable(f)}
-function doSearch(){applyFilters()}
 function filterTree(){renderTree(getFiltered())}
 
 /* ── Selection management (radio pick — single item) ───── */
@@ -750,30 +745,53 @@ function mdToHtml(md){
     .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
     .replace(/\*(.+?)\*/g,'<em>$1</em>');
   const lines=md.split('\n');
-  let html='', inOl=false, inUl=false;
+  let html='', inOl=false, inUl=false, tableBuf=[];
   const closeLists=()=>{
     if(inOl){html+='</ol>';inOl=false;}
     if(inUl){html+='</ul>';inUl=false;}
   };
+  const isSep=r=>/^\|[\s|:-]+\|$/.test(r.replace(/\s/g,''));
+  const flushTable=()=>{
+    if(!tableBuf.length)return;
+    const rows=tableBuf.filter(r=>!isSep(r));
+    const cells=r=>r.split('|').slice(1,-1).map(c=>c.trim());
+    let t='<table><thead><tr>';
+    cells(rows[0]).forEach(c=>{t+=`<th>${inline(c)}</th>`;});
+    t+='</tr></thead><tbody>';
+    rows.slice(1).forEach(r=>{
+      t+='<tr>';
+      cells(r).forEach(c=>{t+=`<td>${inline(c)}</td>`;});
+      t+='</tr>';
+    });
+    t+='</tbody></table>';
+    html+=t;
+    tableBuf=[];
+  };
   for(const raw of lines){
     const t=raw.trimEnd();
-    if(/^### /.test(t))     {closeLists();html+=`<h4>${inline(t.slice(4))}</h4>`;}
-    else if(/^## /.test(t)) {closeLists();html+=`<h3>${inline(t.slice(3))}</h3>`;}
-    else if(/^# /.test(t))  {closeLists();html+=`<h2>${inline(t.slice(2))}</h2>`;}
-    else if(/^---+$/.test(t)){closeLists();html+='<hr>';}
-    else if(/^> /.test(t))  {closeLists();html+=`<blockquote>${inline(t.slice(2))}</blockquote>`;}
-    else if(/^\d+\. /.test(t)){
-      if(!inOl){if(inUl){html+='</ul>';inUl=false;}html+='<ol>';inOl=true;}
-      html+=`<li>${inline(t.replace(/^\d+\. /,''))}</li>`;
-    }else if(/^[-*•] /.test(t)){
-      if(!inUl){if(inOl){html+='</ol>';inOl=false;}html+='<ul>';inUl=true;}
-      html+=`<li>${inline(t.replace(/^[-*•] /,''))}</li>`;
-    }else if(t===''){
-      closeLists();html+='<br>';
+    if(/^\|.+\|/.test(t)){
+      closeLists();tableBuf.push(t);
     }else{
-      closeLists();html+=`<p>${inline(t)}</p>`;
+      flushTable();
+      if(/^### /.test(t))     {closeLists();html+=`<h4>${inline(t.slice(4))}</h4>`;}
+      else if(/^## /.test(t)) {closeLists();html+=`<h3>${inline(t.slice(3))}</h3>`;}
+      else if(/^# /.test(t))  {closeLists();html+=`<h2>${inline(t.slice(2))}</h2>`;}
+      else if(/^---+$/.test(t)){closeLists();html+='<hr>';}
+      else if(/^> /.test(t))  {closeLists();html+=`<blockquote>${inline(t.slice(2))}</blockquote>`;}
+      else if(/^\d+\. /.test(t)){
+        if(!inOl){if(inUl){html+='</ul>';inUl=false;}html+='<ol>';inOl=true;}
+        html+=`<li>${inline(t.replace(/^\d+\. /,''))}</li>`;
+      }else if(/^[-*•] /.test(t)){
+        if(!inUl){if(inOl){html+='</ol>';inOl=false;}html+='<ul>';inUl=true;}
+        html+=`<li>${inline(t.replace(/^[-*•] /,''))}</li>`;
+      }else if(t===''){
+        closeLists();html+='<br>';
+      }else{
+        closeLists();html+=`<p>${inline(t)}</p>`;
+      }
     }
   }
+  flushTable();
   closeLists();
   return html;
 }
@@ -802,8 +820,31 @@ async function _loadCachedAnalysis(){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({ids:_analysisIds,force:false})
     });
-    if(data.from_cache) _showAnalysisResult(data);
+    if(data.status==='done'&&data.from_cache) _showAnalysisResult(data);
   }catch(_){}  // silently ignore — user can still click Analyze
+}
+
+async function _pollAnalyzeJob(jobId, btn, ar, startTime){
+  const elapsed=Math.round((Date.now()-startTime)/1000);
+  try{
+    const job=await api(`/analyze/${jobId}`);
+    if(job.status==='done'){
+      _showAnalysisResult(job);
+      btn.disabled=false;
+      return;
+    }
+    if(job.status==='error'){
+      ar.innerHTML=`<p style="color:var(--red)">⚠ Analysis failed: ${esc(job.error||'Unknown error')}</p>`;
+      btn.disabled=false;
+      return;
+    }
+    // Still running — update elapsed time and poll again
+    ar.innerHTML=`<div class="a-loading"><div class="spinner"></div><span>AI is generating analysis… ${elapsed}s elapsed</span></div>`;
+    setTimeout(()=>_pollAnalyzeJob(jobId,btn,ar,startTime),3000);
+  }catch(e){
+    ar.innerHTML=`<p style="color:var(--red)">⚠ Poll failed: ${esc(e.message)}</p>`;
+    btn.disabled=false;
+  }
 }
 
 async function runAnalysis(force=false){
@@ -812,7 +853,7 @@ async function runAnalysis(force=false){
   const ar=$('analysis-result');
   btn.disabled=true;
   $('analysis-status').textContent='';
-  ar.innerHTML='<div class="a-loading"><div class="spinner"></div><span>Analysing with AI — this may take a moment…</span></div>';
+  ar.innerHTML='<div class="a-loading"><div class="spinner"></div><span>Starting AI analysis…</span></div>';
   ar.style.display='block';
   ar.scrollIntoView({behavior:'smooth',block:'nearest'});
   try{
@@ -821,10 +862,16 @@ async function runAnalysis(force=false){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({ids:_analysisIds,force})
     });
-    _showAnalysisResult(data);
+    if(data.status==='done'){
+      // Cache hit — show immediately
+      _showAnalysisResult(data);
+      btn.disabled=false;
+    }else{
+      // Background job started — begin polling
+      _pollAnalyzeJob(data.job_id,btn,ar,Date.now());
+    }
   }catch(e){
     ar.innerHTML=`<p style="color:var(--red)">⚠ Analysis failed: ${esc(e.message)}</p>`;
-  }finally{
     btn.disabled=false;
   }
 }

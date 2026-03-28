@@ -92,6 +92,26 @@ def _title_key(source_name: str, title: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+# ── Classification cache lookup ────────────────────────────────────────────────
+
+def get_cached_classification(source_name: str, title: str) -> Optional[dict]:
+    """
+    Return the stored impact_level, summary, and tags for an already-known record,
+    or None if this title has never been crawled before.
+    Used by the scheduler to skip LLM calls for unchanged records.
+    """
+    tk = _title_key(source_name, title)
+    with session_scope() as s:
+        row = s.query(OracleUpdate).filter_by(title_key=tk).first()
+        if row and row.impact_level:
+            return {
+                "impact_level": row.impact_level,
+                "summary":      row.summary,
+                "tags":         row.tags,
+            }
+    return None
+
+
 # ── OracleUpdate CRUD ──────────────────────────────────────────────────────────
 
 def upsert_update(data: dict) -> tuple[dict, bool]:

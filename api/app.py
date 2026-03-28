@@ -7,7 +7,6 @@ GET  /                    — health check
 GET  /stats               — summary statistics
 GET  /updates             — list updates (filterable, paginated)
 GET  /updates/{id}        — single update detail
-GET  /search              — full-text + semantic search
 GET  /categories          — distinct category list
 GET  /services            — distinct service list
 GET  /crawl-runs          — crawl audit log
@@ -18,6 +17,7 @@ POST /ask                 — Q&A over stored documents
 
 import logging
 import threading
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -37,10 +37,14 @@ from storage.database import (
     list_crawl_runs, list_updates,
     get_distinct_categories, get_distinct_services, mark_all_seen,
 )
-from processor.summarizer import ask as qa_ask, semantic_search
+from processor.summarizer import ask as qa_ask
 from processor.analyzer import analyze_impact
 
 log = logging.getLogger(__name__)
+
+# In-memory job store for async analyze requests
+# { job_id: {status, analysis, from_cache, generated_at, error} }
+_analyze_jobs: dict = {}
 
 app = FastAPI(
     title="Oracle OCI/OIC Monitor API",
@@ -93,7 +97,7 @@ def list_updates_endpoint(
     impact_level: Optional[str]  = Query(None),
     is_new:       Optional[bool] = Query(None),
     search:       Optional[str]  = Query(None),
-    limit:        int            = Query(100, ge=1, le=500),
+    limit:        int            = Query(5000, ge=1, le=5000),
     offset:       int            = Query(0, ge=0),
 ):
     return list_updates(
@@ -113,35 +117,6 @@ def get_update_endpoint(update_id: int):
     if rec is None:
         raise HTTPException(status_code=404, detail="Update not found")
     return rec.to_dict()
-
-
-@app.get("/search")
-def search_endpoint(
-    q:    str = Query(..., min_length=2),
-    mode: str = Query("all"),   # "all" | "semantic" | "text"
-    k:    int = Query(10, ge=1, le=50),
-):
-    results: list[dict] = []
-
-    if mode in ("all", "text"):
-        text_hits = list_updates(search=q, limit=k)
-        for hit in text_hits:
-            hit["match_type"] = "text"
-        results.extend(text_hits)
-
-    if mode in ("all", "semantic"):
-        sem_hits = semantic_search(q, k=k)
-        seen_ids = {r.get("id") for r in results}
-        for hit in sem_hits:
-            if hit["record_id"] not in seen_ids:
-                rec = get_update(hit["record_id"])
-                if rec:
-                    d = rec.to_dict()
-                    d["match_type"] = "semantic"
-                    d["score"]      = hit["score"]
-                    results.append(d)
-
-    return {"query": q, "count": len(results), "results": results}
 
 
 @app.get("/categories")
@@ -182,14 +157,15 @@ def ask_question(body: AskRequest):
 @app.post("/analyze")
 def analyze_updates(body: AnalyzeRequest):
     """
-    Analyze selected updates and return Markdown upgrade guidance.
-    Returns cached result if available unless force=True is passed.
-    Uses LLM if configured; falls back to rule-based keyword analysis.
+    Start an async impact analysis job.
+    - Returns cached result immediately (status="done", from_cache=True) when available.
+    - Otherwise starts a background LLM job and returns {job_id, status="running"}.
+    - Poll GET /analyze/{job_id} for the result.
     """
     if not body.ids:
         raise HTTPException(status_code=400, detail="No IDs provided")
 
-    # Return cached analysis unless the caller requests a fresh one
+    # Return cached result instantly — no LLM needed
     if not body.force:
         try:
             cached = get_analysis_cache(body.ids)
@@ -198,33 +174,49 @@ def analyze_updates(body: AnalyzeRequest):
             cached = None
         if cached:
             return {
-                "ids":          body.ids,
-                "count":        len(body.ids),
-                "analysis":     cached["analysis"],
+                "job_id":       None,
+                "status":       "done",
                 "from_cache":   True,
+                "analysis":     cached["analysis"],
                 "generated_at": cached["generated_at"],
             }
 
     records = get_updates_by_ids(body.ids)
     if not records:
         raise HTTPException(status_code=404, detail="No updates found for given IDs")
-    analysis = analyze_impact(records)
 
-    # Persist for future requests (best-effort — never block on cache failure)
-    generated_at = None
-    try:
-        saved = save_analysis_cache(body.ids, analysis)
-        generated_at = saved["generated_at"]
-    except Exception as exc:
-        log.warning("Cache write failed: %s", exc)
+    # Start background job so the HTTP request returns immediately
+    job_id = str(uuid.uuid4())
+    _analyze_jobs[job_id] = {"status": "running", "analysis": None,
+                              "from_cache": False, "generated_at": None, "error": None}
 
-    return {
-        "ids":          body.ids,
-        "count":        len(records),
-        "analysis":     analysis,
-        "from_cache":   False,
-        "generated_at": generated_at,
-    }
+    def _run():
+        try:
+            analysis = analyze_impact(records)
+            generated_at = None
+            try:
+                saved = save_analysis_cache(body.ids, analysis)
+                generated_at = saved["generated_at"]
+            except Exception as exc:
+                log.warning("Cache write failed: %s", exc)
+            _analyze_jobs[job_id].update({
+                "status": "done", "analysis": analysis, "generated_at": generated_at,
+            })
+        except Exception as exc:
+            log.error("Analyze job %s failed: %s", job_id, exc)
+            _analyze_jobs[job_id].update({"status": "error", "error": str(exc)})
+
+    threading.Thread(target=_run, name=f"analyze-{job_id[:8]}", daemon=True).start()
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.get("/analyze/{job_id}")
+def get_analyze_job(job_id: str):
+    """Poll for the result of an async analyze job."""
+    job = _analyze_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
 
 @app.get("/updates/{update_id}/versions")

@@ -1,7 +1,4 @@
 # Oracle OCI/OIC Monitor — CORE dependencies
-# Lightweight set used in the portable/green package.
-# No torch / sentence-transformers — semantic search falls back to SQLite FTS.
-# Install full AI features separately with: pip install -r requirements-full.txt
 
 # HTTP & Parsing
 requests>=2.31.0

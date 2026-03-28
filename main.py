@@ -75,7 +75,7 @@ def main() -> None:
     # ── 2. Seed mode ───────────────────────────────────────────────────────
     if args.seed:
         from crawler.parser import get_mock_records
-        from processor.classifier import classify
+        from processor.classifier import rule_classify as classify
         from processor.summarizer import generate_summary
         from storage.database import upsert_update
 
