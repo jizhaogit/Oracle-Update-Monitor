@@ -1,6 +1,6 @@
 # Oracle OCI / OIC Monitor
 
-An intelligent, self-contained tool for tracking Oracle Cloud Infrastructure (OCI) and Oracle Integration Cloud (OIC) documentation updates — release notes, what's-new entries, and feature announcements — with AI-powered impact analysis, semantic search, and side-by-side version comparison.
+An intelligent, self-contained tool for tracking Oracle Cloud Infrastructure (OCI), Oracle Integration Cloud (OIC), and Oracle HCM documentation updates — release notes, what's-new entries, and feature announcements — with AI-powered impact analysis and side-by-side version comparison.
 
 ---
 
@@ -25,7 +25,7 @@ An intelligent, self-contained tool for tracking Oracle Cloud Infrastructure (OC
 9. [Command-Line Options](#command-line-options)
 10. [Project Structure](#project-structure)
 11. [Dependencies](#dependencies)
-11. [Troubleshooting](#troubleshooting)
+12. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -38,8 +38,7 @@ Oracle regularly publishes updates to its cloud services across dozens of produc
 - Crawling 13 official Oracle documentation pages on a configurable schedule (default: every 24 hours)
 - Detecting new entries and content changes between crawls
 - Archiving previous versions of any changed document
-- Classifying each update by impact level (High / Medium / Low) and extracting relevant tags
-- Generating AI summaries (with optional LLM integration)
+- Classifying each update by impact level (High / Medium / Low) and extracting relevant tags using rule-based analysis
 - Producing on-demand AI impact analysis and upgrade guidance with result caching
 - Exposing everything through a browser-based UI and a REST API
 
@@ -51,19 +50,19 @@ The tool is distributed as a **portable green package** — copy the folder to a
 
 | # | Category | Source Name | Type | URL |
 |---|---|---|---|---|
-| 1 | ☁ OCI | What's New | What's New | [servicechanges.htm](https://docs.oracle.com/en-us/iaas/Content/servicechanges.htm) |
-| 2 | ☁ OCI | Release Notes (All) | Release Notes | [releasenotes/](https://docs.oracle.com/en-us/iaas/releasenotes/) |
-| 3 | ☁ OCI | Compute | Release Notes | [releasenotes/changes/compute/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/compute/) |
-| 4 | ☁ OCI | Networking | Release Notes | [releasenotes/changes/network/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/network/) |
-| 5 | ☁ OCI | Database | Release Notes | [releasenotes/changes/database/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/database/) |
-| 6 | ☁ OCI | Storage | Release Notes | [releasenotes/changes/storage/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/storage/) |
-| 7 | ☁ OCI | Security | Release Notes | [releasenotes/changes/security/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/security/) |
-| 8 | ☁ OCI | Analytics | Release Notes | [releasenotes/changes/analytics/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/analytics/) |
-| 9 | ☁ OCI | Containers & Kubernetes | Release Notes | [releasenotes/changes/containers/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/containers/) |
-| 10 | 🔗 OIC | What's New | What's New | [integration-cloud/whats-new/](https://docs.oracle.com/en/cloud/paas/integration-cloud/whats-new/) |
-| 11 | 🔗 OIC | Release Notes | Release Notes | [integration-cloud/release-notes/](https://docs.oracle.com/en/cloud/paas/integration-cloud/release-notes/) |
-| 12 | 👤 HCM | What's New | What's New | [saas/readiness/hcm.html](https://docs.oracle.com/en/cloud/saas/readiness/hcm.html) |
-| 13 | 👤 HCM | REST API Endpoints | Release Notes | [human-resources/farws/rest-endpoints.html](https://docs.oracle.com/en/cloud/saas/human-resources/farws/rest-endpoints.html) |
+| 1 | 👤 HCM | What's New | What's New | [saas/readiness/hcm.html](https://docs.oracle.com/en/cloud/saas/readiness/hcm.html) |
+| 2 | 👤 HCM | REST API Endpoints | Release Notes | [human-resources/farws/rest-endpoints.html](https://docs.oracle.com/en/cloud/saas/human-resources/farws/rest-endpoints.html) |
+| 3 | ☁ OCI | What's New | What's New | [servicechanges.htm](https://docs.oracle.com/en-us/iaas/Content/servicechanges.htm) |
+| 4 | ☁ OCI | Release Notes (All) | Release Notes | [releasenotes/](https://docs.oracle.com/en-us/iaas/releasenotes/) |
+| 5 | ☁ OCI | Compute | Release Notes | [releasenotes/changes/compute/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/compute/) |
+| 6 | ☁ OCI | Networking | Release Notes | [releasenotes/changes/network/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/network/) |
+| 7 | ☁ OCI | Database | Release Notes | [releasenotes/changes/database/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/database/) |
+| 8 | ☁ OCI | Storage | Release Notes | [releasenotes/changes/storage/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/storage/) |
+| 9 | ☁ OCI | Security | Release Notes | [releasenotes/changes/security/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/security/) |
+| 10 | ☁ OCI | Analytics | Release Notes | [releasenotes/changes/analytics/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/analytics/) |
+| 11 | ☁ OCI | Containers & Kubernetes | Release Notes | [releasenotes/changes/containers/](https://docs.oracle.com/en-us/iaas/releasenotes/changes/containers/) |
+| 12 | 🔗 OIC | What's New | What's New | [integration-cloud/whats-new/](https://docs.oracle.com/en/cloud/paas/integration-cloud/whats-new/) |
+| 13 | 🔗 OIC | Release Notes | Release Notes | [integration-cloud/release-notes/](https://docs.oracle.com/en/cloud/paas/integration-cloud/release-notes/) |
 
 > Sources are defined in `config.py` (`ORACLE_SOURCES`) and can be extended with additional Oracle documentation URLs without any code changes.
 
@@ -73,16 +72,12 @@ The tool is distributed as a **portable green package** — copy the folder to a
 
 | Feature | Description |
 |---|---|
-| **Automated crawling** | Polls 11 Oracle OCI/OIC documentation URLs; configurable interval |
+| **Automated crawling** | Polls 13 Oracle OCI/OIC/HCM documentation URLs; configurable interval |
 | **Change detection** | SHA-256 content hashing detects new entries and content updates |
 | **Version history** | Keeps full snapshots of every previous version of a changed document |
 | **Impact classification** | Rule-based classifier tags each update as High / Medium / Low impact |
 | **Auto-tagging** | Keyword extraction assigns service tags (Compute, Networking, Database, etc.) |
-| **AI summarisation** | Optional OpenAI, Anthropic, Bedrock, or local Ollama LLM summarises long entries |
 | **AI impact analysis** | On-demand upgrade guidance generated by LLM; results cached for instant replay |
-| **Semantic search** | HuggingFace embeddings + ChromaDB vector store (optional, ~2.5 GB) |
-| **Full-text search** | Always-available keyword search across title, content, and summary |
-| **Q&A** | Ask natural-language questions over stored documents |
 | **Conclusion view** | Pick a single item via radio button and compare versions side-by-side |
 | **Appearance control** | Per-user font-size selector and background colour picker (saved in browser) |
 | **Portable runtime** | Ships as a self-contained folder; `run.bat` downloads Python automatically |
@@ -106,7 +101,7 @@ oracle_monitor/
 ├── processor/
 │   ├── analyzer.py       ← AI impact analysis + rule-based fallback
 │   ├── classifier.py     ← rule-based + optional LLM classifier
-│   └── summarizer.py     ← LangChain summarisation, vector store, Q&A
+│   └── summarizer.py     ← LangChain summarisation + Q&A
 │
 ├── storage/
 │   ├── models.py         ← SQLAlchemy ORM (OracleUpdate, UpdateVersion, AnalysisCache, CrawlRun)
@@ -123,11 +118,11 @@ oracle_monitor/
 **Data flow:**
 
 ```
-Oracle Docs → fetcher → parser → classifier → summarizer → database
-                                                              ↓
-                                               FastAPI REST API
-                                                              ↓
-                                               Browser UI (index.html)
+Oracle Docs → fetcher → parser → classifier → database
+                                                  ↓
+                                     FastAPI REST API
+                                                  ↓
+                                     Browser UI (index.html)
 ```
 
 ---
@@ -154,15 +149,6 @@ python -m pip install -r requirements-core.txt
 python main.py
 ```
 
-### Option C — Full AI mode (semantic search + local embeddings)
-
-Installs sentence-transformers and ChromaDB (~2.5 GB including PyTorch):
-
-```bat
-python -m pip install -r requirements-full.txt
-python main.py
-```
-
 ---
 
 ## Configuration
@@ -176,7 +162,7 @@ copy .env.example .env
 Then edit `.env` with a text editor:
 
 ```ini
-# ── LLM for AI summarisation & impact analysis ──────────
+# ── LLM for AI impact analysis ───────────────────────────
 # "none"      — rule-based only (default, no API key needed)
 # "openai"    — requires OPENAI_API_KEY
 # "anthropic" — requires ANTHROPIC_API_KEY
@@ -193,7 +179,7 @@ BEDROCK_REGION=us-east-1
 BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
 
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama2
+OLLAMA_MODEL=llama3
 
 # ── Crawl schedule ──────────────────────────────────────
 CRAWL_INTERVAL_HOURS=24     # how often to check for updates
@@ -207,7 +193,7 @@ API_PORT=8000
 LOG_LEVEL=INFO              # DEBUG | INFO | WARNING | ERROR
 ```
 
-> **Note:** The application works fully without any API key. Set `LLM_PROVIDER=none` to use the built-in rule-based classifier and summary generator.
+> **Note:** The application works fully without any API key. Set `LLM_PROVIDER=none` to use the built-in rule-based classifier. The LLM is only called when you click the **🧠 Analyze Impact & Upgrade Guide** button — crawling always uses rule-based classification.
 
 ---
 
@@ -221,9 +207,6 @@ The toolbar at the top provides global controls:
 
 | Control | Description |
 |---|---|
-| **Search box** | Type and press Enter (or click Search) to filter updates by keyword |
-| **Category** dropdown | Filter by OCI or OIC |
-| **Impact** dropdown | Filter by High / Medium / Low impact level |
 | **↺ Refresh** | Reload updates from the server |
 | **✓ Mark Seen** | Mark all currently-new items as seen (removes NEW badge) |
 | **▶ Crawl Now** | Trigger an immediate crawl in the background |
@@ -242,6 +225,7 @@ The left sidebar shows a collapsible tree organised by **Category → Service �
 - **✦ blue** items are newly discovered since last "Mark Seen".
 - The **radio button** on each item marks it as the active selection for Conclusion.
 - Use the **Filter** box at the top of the sidebar to search within the tree.
+- Use the **Category** and **Impact** dropdowns to filter the list.
 
 ### Detail View
 
@@ -249,7 +233,7 @@ Clicking any item shows its full detail:
 
 - **Title** with impact badge, category badge, service badge, date, and NEW/version badges.
 - Clicking the **version badge** (e.g. `v3`) opens the Conclusion modal pre-loaded with that item's history.
-- **Summary** — AI-generated or rule-based summary of the update.
+- **Summary** — rule-based or AI-generated summary of the update.
 - **Full Content** — the original text from Oracle's documentation page (scrollable).
 - **Tags** — automatically extracted service tags.
 - **View Source** — direct link to the Oracle documentation page.
@@ -262,7 +246,7 @@ A table listing every update with columns:
 |---|---|
 | Radio | Select this item as the active Conclusion target |
 | Title | Update title (click row to open Detail View) |
-| Category | OCI or OIC |
+| Category | OCI, OIC, or HCM |
 | Service | Service name |
 | Impact | High / Medium / Low |
 | Ver | Version count; click if > 1 to open comparison |
@@ -272,7 +256,7 @@ A table listing every update with columns:
 Shows aggregated counts:
 
 - Total updates in the database
-- Breakdown by category (OCI / OIC)
+- Breakdown by category (OCI / OIC / HCM)
 - Breakdown by service
 - Breakdown by impact level
 - Last successful crawl time and results
@@ -311,6 +295,7 @@ Inside the Conclusion modal, the **🧠 Analyze Impact & Upgrade Guide** button 
 2. **Action Required** — Yes / No / N/A with explanation.
 3. **Upgrade Steps** (when action is required) — numbered, concrete steps with API/SDK/CLI specifics.
 4. **Affected Areas** — APIs, SDKs, Console, CLI, Terraform, etc.
+5. **Summary Table** — at the end when multiple updates are analysed together.
 
 **Without an LLM** (`LLM_PROVIDER=none` or LLM unreachable), a keyword-based fallback analysis is produced instead, with a note explaining how to enable full AI guidance.
 
@@ -343,18 +328,17 @@ The API is available at `http://127.0.0.1:8000`. Interactive documentation (Swag
 | `GET` | `/` | Serves the browser UI |
 | `GET` | `/health` | Health check |
 | `GET` | `/stats` | Summary statistics |
-| `GET` | `/updates` | List updates (supports `category`, `service`, `impact_level`, `is_new`, `search`, `limit`, `offset` query params) |
+| `GET` | `/updates` | List updates (supports `category`, `service`, `impact_level`, `is_new`, `limit`, `offset` query params) |
 | `GET` | `/updates/{id}` | Single update detail |
 | `GET` | `/updates/{id}/versions` | Version history for one update |
-| `GET` | `/search?q=...&mode=all` | Search — `mode`: `all` \| `text` \| `semantic` |
 | `GET` | `/categories` | Distinct category list |
 | `GET` | `/services` | Distinct service list |
 | `GET` | `/crawl-runs` | Crawl audit log |
 | `GET` | `/conclusion?ids=1` | Enriched record with version history for the given ID |
 | `POST` | `/crawl` | Trigger a manual crawl |
 | `POST` | `/mark-seen` | Mark all new updates as seen |
-| `POST` | `/ask` | Q&A — body: `{"question": "..."}` |
-| `POST` | `/analyze` | AI impact analysis — body: `{"ids": [1], "force": false}` |
+| `POST` | `/analyze` | Start async AI impact analysis — body: `{"ids": [1], "force": false}` |
+| `GET` | `/analyze/{job_id}` | Poll for the result of an async analyze job |
 
 **`/analyze` request body:**
 
@@ -363,17 +347,25 @@ The API is available at `http://127.0.0.1:8000`. Interactive documentation (Swag
 | `ids` | `int[]` | required | List of update IDs to analyse |
 | `force` | `bool` | `false` | `true` to skip cache and regenerate |
 
-**`/analyze` response:**
+**`/analyze` response (cache hit — instant):**
 
 ```json
 {
-  "ids": [42],
-  "count": 1,
-  "analysis": "## Impact Analysis...",
+  "job_id": null,
+  "status": "done",
   "from_cache": true,
+  "analysis": "## Impact Analysis...",
   "generated_at": "2026-03-28T09:30:00"
 }
 ```
+
+**`/analyze` response (new job — poll until done):**
+
+```json
+{ "job_id": "abc123", "status": "running" }
+```
+
+Poll `GET /analyze/{job_id}` every few seconds until `status` is `"done"`.
 
 **Example:**
 
@@ -385,11 +377,6 @@ curl "http://127.0.0.1:8000/updates?category=OCI&impact_level=High&limit=20"
 curl -X POST http://127.0.0.1:8000/analyze \
      -H "Content-Type: application/json" \
      -d '{"ids": [42], "force": false}'
-
-# Ask a question
-curl -X POST http://127.0.0.1:8000/ask \
-     -H "Content-Type: application/json" \
-     -d '{"question": "What changed in OCI Networking this month?"}'
 ```
 
 ---
@@ -421,8 +408,7 @@ oracle_monitor/
 ├── .env.example            ← configuration template (safe to commit)
 ├── .gitignore
 ├── README.md
-├── requirements-core.txt   ← lightweight deps, no PyTorch (~300 MB)
-├── requirements-full.txt   ← adds sentence-transformers + ChromaDB (~2.5 GB)
+├── requirements-core.txt   ← all required dependencies (~300 MB)
 ├── config.py               ← all settings
 ├── main.py                 ← entry point
 ├── run.bat                 ← Windows portable launcher
@@ -439,11 +425,11 @@ oracle_monitor/
 ├── processor/
 │   ├── analyzer.py         ← AI impact analysis + rule-based fallback
 │   ├── classifier.py       ← impact/tag classification
-│   └── summarizer.py       ← AI summary, vector store, Q&A
+│   └── summarizer.py       ← AI summary + Q&A
 │
 ├── storage/
 │   ├── models.py           ← SQLAlchemy ORM models (OracleUpdate, UpdateVersion, AnalysisCache, CrawlRun)
-│   ├── database.py         ← CRUD + schema migration (v1→v3)
+│   ├── database.py         ← CRUD + schema migration
 │   └── file_store.py       ← raw HTML storage
 │
 ├── ui/
@@ -451,8 +437,7 @@ oracle_monitor/
 │
 ├── data/                   ← runtime data (not committed)
 │   ├── db/                 ← SQLite database
-│   ├── raw/                ← archived raw HTML pages
-│   └── vectors/            ← ChromaDB vector store
+│   └── raw/                ← archived raw HTML pages
 │
 ├── logs/                   ← log files (not committed)
 └── runtime/                ← portable Python runtime (not committed)
@@ -471,18 +456,8 @@ oracle_monitor/
 | `beautifulsoup4` + `lxml` | HTML parsing |
 | `requests` + `urllib3` | HTTP crawling |
 | `apscheduler` | Periodic crawl scheduling |
-| `langchain` + `langchain-community` | LLM integration, Q&A chain |
+| `langchain` + `langchain-community` | LLM integration |
 | `python-dotenv` | `.env` file loading |
-
-### Full (requirements-full.txt) — additional ~2.2 GB
-
-| Package | Purpose |
-|---|---|
-| `sentence-transformers` | Local HuggingFace text embeddings |
-| `chromadb` | Vector store for semantic search |
-| `torch` | Required by sentence-transformers |
-
-> The application runs fully without the full dependencies. Semantic search and vector-based Q&A gracefully degrade to keyword search when `sentence-transformers` is not installed.
 
 ---
 
@@ -509,7 +484,7 @@ oracle_monitor/
 - For OpenAI: verify `OPENAI_API_KEY` is set correctly.
 - For Anthropic: verify `ANTHROPIC_API_KEY` starts with `sk-ant-`.
 - For Bedrock: run `aws sso login` first, then verify `BEDROCK_REGION` and `BEDROCK_MODEL_ID`.
-- For Ollama: verify Ollama is running (`ollama serve`) and `OLLAMA_BASE_URL` points to it.
+- For Ollama: verify Ollama is running (`ollama serve`) and `OLLAMA_BASE_URL` points to it. For large prompts Ollama may take several minutes — the analysis runs in the background and the UI polls for the result automatically.
 
 **AI Impact Analysis returns HTTP 500**
 - This can happen if the database was created before the analysis cache table was added. Restart `run.bat` — `init_db` will automatically add any missing columns on startup.
@@ -517,5 +492,5 @@ oracle_monitor/
 
 **Want to reset all data**
 - Stop the server.
-- Delete `data/db/oracle_monitor.db` and `data/vectors/` (if present).
-- Restart — the database and vector store are rebuilt from scratch on the next crawl.
+- Delete `data/db/oracle_monitor.db`.
+- Restart — the database is rebuilt from scratch on the next crawl.
