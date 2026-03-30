@@ -80,6 +80,7 @@ label{font-size:0.87rem;color:var(--text-dim)}
 .b-svc{background:var(--bg-light);color:var(--text);font-weight:400}
 .b-H{background:var(--red);color:#fff}.b-M{background:var(--orange);color:#fff}.b-L{background:var(--green);color:#fff}
 .b-date{background:var(--bg-mid);color:var(--text-dim);font-weight:400}
+.b-code{background:#1a3a5c;color:#90caf9;font-weight:700;font-size:0.82rem;letter-spacing:.04em}
 .b-new{background:#1565c0;color:#fff}
 .b-ver{background:#4a148c;color:#fff;cursor:pointer}
 .b-ver:hover{background:#7b1fa2}
@@ -88,6 +89,14 @@ label{font-size:0.87rem;color:var(--text-dim)}
 .sbox{background:var(--bg-mid);padding:12px 16px;border-radius:4px;font-size:1rem;line-height:1.7}
 .cbox{background:var(--bg-dark);padding:14px 16px;border-radius:4px;font-size:0.93rem;line-height:1.8;
   white-space:pre-wrap;word-wrap:break-word;max-height:280px;overflow-y:auto}
+#d-features{display:flex;flex-direction:column;gap:4px;max-height:320px;overflow-y:auto}
+.feat-row{display:flex;align-items:flex-start;gap:10px;padding:7px 12px;border-radius:4px;
+  background:var(--bg-mid);cursor:pointer;transition:background .12s}
+.feat-row:hover{background:var(--bg-light)}
+.feat-imp{flex-shrink:0;width:6px;height:6px;border-radius:50%;margin-top:6px}
+.feat-imp.iH{background:var(--red)}.feat-imp.iM{background:var(--orange)}.feat-imp.iL{background:var(--green)}
+.feat-title{font-size:0.88rem;color:var(--text);line-height:1.5}
+.feat-desc{font-size:0.8rem;color:var(--text-dim);margin-top:2px;line-height:1.4}
 .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .tag{background:var(--bg-light);padding:3px 10px;border-radius:3px;font-size:0.87rem}
 .srclink{color:var(--accent2);font-size:0.87rem;display:inline-block;margin-top:10px;text-decoration:none;word-break:break-all}
@@ -273,6 +282,10 @@ input[type=color]{width:32px;height:32px;border:1px solid #3a3f6a;border-radius:
           <div id="d-summary" class="sbox"></div>
           <div class="slbl">Full Content</div>
           <div id="d-content" class="cbox"></div>
+          <div id="d-features-wrap" style="display:none">
+            <div class="slbl" id="d-features-lbl">Features in this Release</div>
+            <div id="d-features"></div>
+          </div>
           <div class="slbl">Tags</div>
           <div id="d-tags" class="tags"></div>
           <a id="d-link" class="srclink" href="#" target="_blank">🔗 View Source</a>
@@ -457,20 +470,57 @@ function showDetail(item){
   const dv=$('dview');dv.style.cssText='display:flex;flex:1;overflow:hidden;flex-direction:column';
   $('dtitle').textContent=item.title;
   const dt=item.release_date?
-    new Date(item.release_date).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}):'—';
+    new Date(item.release_date).toLocaleDateString('en-US',{year:'numeric',month:'short'}):'—';
   const imp=item.impact_level||'';
   const verCount=(item.version_count||1);
+  const rc=item.release_code||'';
   $('dbadges').innerHTML=
     `<span class="badge b-cat${item.category==='OIC'?'-oic':''}">${CI[item.category]||''} ${item.category||''}</span>`+
     `<span class="badge b-svc">${SI[item.service]||''} ${item.service||''}</span>`+
     (imp?`<span class="badge b-${imp[0]}">${imp} Impact</span>`:'')+
     `<span class="badge b-date">📅 ${dt}</span>`+
+    (rc?`<span class="badge b-code">🏷 ${rc}</span>`:'')+
     (item.is_new?`<span class="badge b-new">NEW</span>`:'')+
     (verCount>1?`<span class="badge b-ver" onclick="openConclusionSingle(${item.id})" title="View version history">v${verCount} — Compare Versions</span>`:'');
   $('d-summary').textContent=item.summary||'No summary available.';
   $('d-content').textContent=item.content||'No content available.';
   $('d-tags').innerHTML=(item.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('');
   const lnk=$('d-link');lnk.href=item.source_url||'#';lnk.textContent='🔗 '+(item.source_url||'');
+  // Features list — Strategy 1: child records titled "<this title> — <feature>"
+  const prefix=item.title+' — ';
+  const features=ALL.filter(u=>u.title.startsWith(prefix)&&u.category===item.category&&u.service===item.service);
+  const fw=$('d-features-wrap'), fd=$('d-features'), lbl=$('d-features-lbl');
+  if(features.length){
+    lbl.textContent='Features in this Release';
+    fd.innerHTML=features.map(f=>{
+      const ic=f.impact_level||'';
+      const icCls=ic==='High'?'iH':ic==='Medium'?'iM':'iL';
+      const fname=f.title.slice(prefix.length);
+      return `<div class="feat-row" onclick="showDetail(ALL.find(u=>u.id===${f.id}))">
+        <span class="feat-imp ${icCls}"></span>
+        <div><div class="feat-title">${esc(fname)}</div>`+
+        (f.summary?`<div class="feat-desc">${esc(f.summary.substring(0,120))}</div>`:'')
+        +`</div></div>`;
+    }).join('');
+    fw.style.display='';
+  }else{
+    // Strategy 2: parse the content text into sentences as a feature list
+    const sentences=(item.content||'').split(/\.(?:\s+|\s*$)/)
+      .map(s=>s.replace(/^[,;\s]+/,'').trim())
+      .filter(s=>s.length>=20);
+    if(sentences.length>=2){
+      lbl.textContent='What\'s in this Update';
+      fd.innerHTML=sentences.map(s=>
+        `<div class="feat-row" style="cursor:default">
+          <span class="feat-imp iL"></span>
+          <div class="feat-title">${esc(s)}.</div>
+        </div>`
+      ).join('');
+      fw.style.display='';
+    }else{
+      fw.style.display='none';
+    }
+  }
   openTab('detail');
 }
 
@@ -479,7 +529,8 @@ function renderTable(items){
   const tb=$('tbody');tb.innerHTML='';
   items.forEach(u=>{
     const dt=u.release_date?
-      new Date(u.release_date).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}):'—';
+      new Date(u.release_date).toLocaleDateString('en-US',{year:'numeric',month:'short'}):'—';
+    const dtCell=u.release_code?`${dt} <span style="color:#90caf9;font-size:0.82rem">${u.release_code}</span>`:dt;
     const tr=document.createElement('tr');
     if(u.is_new)tr.className='rn';
     const ic=u.impact_level;
@@ -490,7 +541,7 @@ function renderTable(items){
       `<td title="${esc(u.title)}">${esc(u.title.substring(0,90))}</td>`+
       `<td>${u.category||''}</td><td>${u.service||''}</td>`+
       `<td class="${ic==='High'?'iH':ic==='Medium'?'iM':ic==='Low'?'iL':''}">${ic||'—'}</td>`+
-      `<td>${dt}</td>`+
+      `<td>${dtCell}</td>`+
       `<td style="text-align:center;color:${ver>1?'var(--accent2)':'var(--text-dim)'}">`+
         (ver>1?`<span style="cursor:pointer" onclick="openConclusionSingle(${u.id})" title="Compare versions">v${ver}</span>`:`v${ver}`)+
       `</td>`;
