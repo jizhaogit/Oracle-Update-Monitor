@@ -5,6 +5,8 @@ crawler/fetcher.py — HTTP page fetcher with retry, rate-limiting, and
 
 import logging
 import time
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 from typing import Optional
 
 import requests
@@ -56,10 +58,23 @@ def _build_session() -> requests.Session:
 _session = _build_session()
 
 
-def fetch_page(url: str) -> Optional[str]:
+def _parse_last_modified(header_value: str) -> Optional[datetime]:
+    """Parse an HTTP Last-Modified header string into a datetime (UTC, tz-naive)."""
+    try:
+        dt = parsedate_to_datetime(header_value)
+        # Strip timezone so it's consistent with the rest of the app's naive datetimes
+        return dt.replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+def fetch_page(url: str) -> tuple[Optional[str], Optional[datetime]]:
     """
-    Fetch a URL and return its HTML content as a string.
-    Returns None on failure.  Enforces REQUEST_DELAY between requests.
+    Fetch a URL and return (html, last_modified).
+
+    - html          : page content as a string, or None on failure
+    - last_modified : datetime parsed from the HTTP Last-Modified header,
+                      or None if the header is absent / unparseable
     """
     global _last_request_time
 
@@ -74,11 +89,14 @@ def fetch_page(url: str) -> Optional[str]:
         _last_request_time = time.time()
 
         if resp.status_code == 200:
-            log.info("OK %d  (%d bytes)  %s", resp.status_code, len(resp.content), url)
-            return resp.text
+            last_mod = _parse_last_modified(resp.headers.get("Last-Modified", ""))
+            log.info("OK %d  (%d bytes)  last-modified=%s  %s",
+                     resp.status_code, len(resp.content),
+                     last_mod.date() if last_mod else "none", url)
+            return resp.text, last_mod
 
         log.warning("HTTP %d for %s", resp.status_code, url)
-        return None
+        return None, None
 
     except requests.exceptions.ConnectionError as exc:
         log.error("Connection error for %s: %s", url, exc)
@@ -87,4 +105,4 @@ def fetch_page(url: str) -> Optional[str]:
     except Exception as exc:
         log.error("Unexpected error fetching %s: %s", url, exc)
 
-    return None
+    return None, None

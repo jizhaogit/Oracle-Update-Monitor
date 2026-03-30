@@ -28,8 +28,37 @@ _DATE_PATTERNS = [
     (r"\b(\d{1,2}/\d{1,2}/\d{4})\b",           "%m/%d/%Y"),
 ]
 
+# Oracle uses a YYX release naming convention where:
+#   YY = 2-digit year (24 = 2024, 25 = 2025 …)
+#   X  = quarterly letter: A = Q1 (Jan), B = Q2 (Apr), C = Q3 (Jul), D = Q4 (Oct)
+_ORACLE_RELEASE_RE = re.compile(r"\b(\d{2})([A-D])\b", re.IGNORECASE)
+_ORACLE_QUARTER_MONTH = {"A": 1, "B": 4, "C": 7, "D": 10}
+
+
+def _parse_oracle_release(text: str) -> tuple[Optional[datetime], Optional[str]]:
+    """
+    Extract an Oracle YYX release code from *text* and return (date, code).
+
+    Example: "26A" → (datetime(2026, 1, 1), "26A")
+             "25D" → (datetime(2025, 10, 1), "25D")
+    Returns (None, None) if no release code is found.
+    """
+    m = _ORACLE_RELEASE_RE.search(text)
+    if not m:
+        return None, None
+    yy  = int(m.group(1))
+    ltr = m.group(2).upper()
+    year  = 2000 + yy
+    month = _ORACLE_QUARTER_MONTH[ltr]
+    code  = f"{yy}{ltr}"          # normalise to upper-case, e.g. "26A"
+    return datetime(year, month, 1), code
+
 
 def _parse_date(text: str) -> Optional[datetime]:
+    # Try Oracle release code first (higher priority for HCM/OIC titles)
+    dt, _ = _parse_oracle_release(text)
+    if dt:
+        return dt
     for pattern, fmt in _DATE_PATTERNS:
         m = re.search(pattern, text, re.IGNORECASE)
         if m:
@@ -448,6 +477,80 @@ def _try_hcm_readiness(soup: BeautifulSoup) -> list[dict]:
     return items
 
 
+def parse_hcm_detail_page(
+    html: str,
+    parent_title: str,
+    source_url: str,
+    source_name: str,
+    category: str,
+    service: str,
+    doc_type: str,
+) -> list[dict]:
+    """
+    Parse an Oracle HCM module What's New detail page (linked from the hub).
+
+    Each h3/h4 heading becomes a child record titled
+    "{parent_title} — {feature_name}" so the UI's "Features in this Release"
+    block can pick them up automatically.
+
+    Caps: 60 feature headings per page.
+    """
+    if not html:
+        return []
+
+    soup = BeautifulSoup(html, "lxml")
+    for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+        tag.decompose()
+
+    items: list[dict] = []
+    seen:  set[str]   = set()
+
+    for heading in soup.find_all(["h3", "h4"])[:60]:
+        feat_name = _clean(heading.get_text())
+        if len(feat_name) < 5:
+            continue
+        key = feat_name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        parts: list[str] = []
+        for sib in heading.next_siblings:
+            if not isinstance(sib, Tag):
+                continue
+            if sib.name in ("h2", "h3", "h4"):
+                break
+            text = _clean(sib.get_text())
+            if text:
+                parts.append(text)
+        content = " ".join(parts)[:2000] or feat_name
+        date = _parse_date(feat_name) or _parse_date(content)
+
+        full_title = f"{parent_title} — {feat_name}"
+        _, rc = _parse_oracle_release(parent_title)
+        items.append({
+            "source_name":  source_name,
+            "source_url":   source_url,
+            "category":     category,
+            "service":      service,
+            "doc_type":     doc_type,
+            "title":        full_title[:480],
+            "content":      content,
+            "summary":      None,
+            "_tags":        "[]",
+            "impact_level": None,
+            "release_date": date,
+            "release_code": rc,
+            "content_hash": _make_hash(full_title, content, source_url),
+            "is_new":       True,
+            "vector_id":    None,
+        })
+
+    log.info("HCM detail parse: %d features from %s (parent: %s)",
+             len(items), source_url, parent_title)
+    return items
+
+
 def parse_oracle_page(
     html: str,
     source_name: str,
@@ -455,10 +558,14 @@ def parse_oracle_page(
     category: str,
     service: str,
     doc_type: str,
+    page_date: Optional[datetime] = None,
 ) -> list[dict]:
     """
     Parse raw HTML into a list of update records ready for database insertion.
     Each record is a dict matching the OracleUpdate column names (minus id).
+
+    page_date : HTTP Last-Modified datetime for the page (used as release_date
+                fallback for records that contain no date in their text).
     """
     if not html:
         return []
@@ -507,6 +614,21 @@ def parse_oracle_page(
     for item in items:
         title   = item["title"]
         content = item["content"] or title
+
+        # Derive Oracle release code from title + content (e.g. "26A" → Jan 2026)
+        release_date = item.get("release_date")
+        release_code = item.get("release_code")
+        if not release_code:
+            _, release_code = _parse_oracle_release(title)
+        if not release_code:
+            _, release_code = _parse_oracle_release(content)
+        # If the code gives us a better date than what the parser found, use it
+        if release_code and not release_date:
+            release_date, _ = _parse_oracle_release(title + " " + content)
+        # Last resort: use the page's HTTP Last-Modified date
+        if not release_date and page_date:
+            release_date = page_date
+
         records.append({
             "source_name":  source_name,
             "source_url":   source_url,
@@ -518,7 +640,8 @@ def parse_oracle_page(
             "summary":      item.get("summary"),      # pre-filled by some parsers
             "_tags":        "[]",
             "impact_level": item.get("impact_level"), # pre-filled by some parsers
-            "release_date": item.get("release_date"),
+            "release_date": release_date,
+            "release_code": release_code,
             "content_hash": _make_hash(title, content, source_url),
             "is_new":       True,
             "vector_id":    None,
@@ -754,8 +877,93 @@ MOCK_UPDATES: list[dict] = [
             "improved integration with Oracle Time and Labor."
         ),
         "release_date": datetime(2026, 1, 1),
+        "release_code": "26A",
         "impact_level": "Medium",
         "_tags":        '["HCM", "Payroll", "Whats New"]',
+    },
+    # ── Child feature records for "HCM — Payroll What's New 26A" ─────────────
+    # Title must start with the exact parent title + " — " for the
+    # "Features in this Release" block to link them.
+    {
+        "source_name":  "HCM — What's New",
+        "source_url":   "https://docs.oracle.com/en/cloud/saas/readiness/hcm.html",
+        "category":     "HCM",
+        "service":      "Human Capital Management",
+        "doc_type":     "whats_new",
+        "title":        "HCM — Payroll What's New 26A — New Position Fields: Working Hours and Frequency",
+        "content":      (
+            "Two new fields are added to the Position page: Working Hours and Frequency. "
+            "These fields let you record the standard working hours and the frequency (e.g. Weekly, "
+            "Bi-Weekly, Monthly) directly on a position. The values default to the assignment when "
+            "the position is selected, reducing manual data entry and ensuring consistency across "
+            "all workers assigned to the same position. "
+            "Affected pages: Manage Positions, Position Details. "
+            "Integration impact: Position REST API v2 returns the new fields workingHours and "
+            "frequency; downstream integrations that consume position data should be updated."
+        ),
+        "release_date": datetime(2026, 1, 1),
+        "release_code": "26A",
+        "impact_level": "Medium",
+        "_tags":        '["HCM", "Payroll", "Position", "REST API"]',
+        "summary":      "Adds WorkingHours and Frequency fields to Position; defaults to assignment on selection.",
+    },
+    {
+        "source_name":  "HCM — What's New",
+        "source_url":   "https://docs.oracle.com/en/cloud/saas/readiness/hcm.html",
+        "category":     "HCM",
+        "service":      "Human Capital Management",
+        "doc_type":     "whats_new",
+        "title":        "HCM — Payroll What's New 26A — Improved Balance Calculation Performance",
+        "content":      (
+            "Payroll balance calculations have been optimised in 26A to reduce run times for "
+            "large legislative data groups. Internal caching now reuses already-computed element "
+            "results across multiple balance calls within the same payroll run, resulting in up to "
+            "40% faster calculation for customers with more than 50,000 payees."
+        ),
+        "release_date": datetime(2026, 1, 1),
+        "release_code": "26A",
+        "impact_level": "Low",
+        "_tags":        '["HCM", "Payroll", "Performance"]',
+        "summary":      "Payroll balance calculations up to 40% faster for large legislative data groups.",
+    },
+    {
+        "source_name":  "HCM — What's New",
+        "source_url":   "https://docs.oracle.com/en/cloud/saas/readiness/hcm.html",
+        "category":     "HCM",
+        "service":      "Human Capital Management",
+        "doc_type":     "whats_new",
+        "title":        "HCM — Payroll What's New 26A — New Payroll Flow Pattern Templates",
+        "content":      (
+            "Several new predefined payroll flow pattern templates are available in 26A: "
+            "Quick Pay with Costing, Retroactive Pay Run, and End-of-Year Processing. "
+            "These templates reduce the configuration required when setting up recurring payroll "
+            "flows and include the most commonly used tasks in the correct sequence. "
+            "Existing custom flow patterns are unaffected."
+        ),
+        "release_date": datetime(2026, 1, 1),
+        "release_code": "26A",
+        "impact_level": "Medium",
+        "_tags":        '["HCM", "Payroll", "Flow Patterns"]',
+        "summary":      "Three new predefined payroll flow pattern templates added: Quick Pay with Costing, Retroactive Pay Run, End-of-Year Processing.",
+    },
+    {
+        "source_name":  "HCM — What's New",
+        "source_url":   "https://docs.oracle.com/en/cloud/saas/readiness/hcm.html",
+        "category":     "HCM",
+        "service":      "Human Capital Management",
+        "doc_type":     "whats_new",
+        "title":        "HCM — Payroll What's New 26A — Enhanced Retroactive Pay Handling",
+        "content":      (
+            "Retroactive pay now supports component-level recalculation. When a salary or element "
+            "entry is backdated, 26A recalculates only the affected earnings components rather than "
+            "the full payroll run. The Retroactive Notifications report has been updated to show "
+            "the delta amount per component alongside the employee name and assignment details."
+        ),
+        "release_date": datetime(2026, 1, 1),
+        "release_code": "26A",
+        "impact_level": "Medium",
+        "_tags":        '["HCM", "Payroll", "Retroactive Pay"]',
+        "summary":      "Retroactive pay supports component-level recalculation; updated notifications report shows delta per component.",
     },
     {
         "source_name":  "HCM — What's New",
@@ -771,6 +979,7 @@ MOCK_UPDATES: list[dict] = [
             "The check-in feature now supports structured templates and manager dashboards."
         ),
         "release_date": datetime(2026, 1, 1),
+        "release_code": "26A",
         "impact_level": "Medium",
         "_tags":        '["HCM", "Talent Management", "Whats New", "AI"]',
     },

@@ -31,6 +31,7 @@ class OracleUpdate(Base):
     _tags         = Column("tags", Text, nullable=True)
     impact_level  = Column(String(20),  nullable=True)    # High | Medium | Low
     release_date  = Column(DateTime,    nullable=True)
+    release_code  = Column(String(20),  nullable=True)    # Oracle YYX code e.g. "26A"
     crawled_at    = Column(DateTime,    default=datetime.utcnow)
     content_hash  = Column(String(64),  unique=True, nullable=False)
     is_new        = Column(Boolean,     default=True)
@@ -70,6 +71,7 @@ class OracleUpdate(Base):
             "tags":          self.tags,
             "impact_level":  self.impact_level,
             "release_date":  self.release_date.isoformat() if self.release_date else None,
+            "release_code":  self.release_code,
             "crawled_at":    self.crawled_at.isoformat() if self.crawled_at else None,
             "is_new":        self.is_new,
             "title_key":     self.title_key,

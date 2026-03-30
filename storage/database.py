@@ -46,6 +46,8 @@ def init_db() -> None:
     _add_column_if_missing("analysis_cache", "ids_json",     "TEXT")
     _add_column_if_missing("analysis_cache", "analysis",     "TEXT")
     _add_column_if_missing("analysis_cache", "generated_at", "DATETIME")
+    # Columns added in v4 (Oracle release code)
+    _add_column_if_missing("oracle_updates", "release_code", "VARCHAR(20)")
 
     log.info("Database initialised at %s", DATABASE_URL)
 
@@ -141,8 +143,18 @@ def upsert_update(data: dict) -> tuple[dict, bool]:
             ).first()
 
         if existing is not None:
-            # Same content → nothing to do
+            # Same content — but backfill date / release_code if they were missing
             if existing.content_hash == data["content_hash"]:
+                changed = False
+                if existing.release_date is None and data.get("release_date"):
+                    existing.release_date = data["release_date"]
+                    changed = True
+                if existing.release_code is None and data.get("release_code"):
+                    existing.release_code = data["release_code"]
+                    changed = True
+                if changed:
+                    s.flush()
+                    log.debug("Backfilled date/code for id=%s: %s", existing.id, existing.title[:60])
                 return existing.to_dict(), False
 
             # ── 3. Content changed: archive the old snapshot ───────────────
@@ -166,6 +178,7 @@ def upsert_update(data: dict) -> tuple[dict, bool]:
             existing.summary       = data.get("summary")          # will be regenerated
             existing._tags         = data.get("_tags", existing._tags)
             existing.impact_level  = data.get("impact_level", existing.impact_level)
+            existing.release_code  = data.get("release_code", existing.release_code)
             existing.content_hash  = data["content_hash"]
             existing.crawled_at    = datetime.utcnow()
             existing.is_new        = True

@@ -7,15 +7,17 @@ Runs:
 """
 
 import logging
+import re
 from datetime import datetime
 from typing import Callable, Optional
+from urllib.parse import urljoin
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from config import CRAWL_INTERVAL_HOURS, CRAWL_ON_STARTUP, ORACLE_SOURCES
 from crawler.fetcher import fetch_page
-from crawler.parser import get_mock_records, parse_oracle_page
+from crawler.parser import get_mock_records, parse_hcm_detail_page, parse_oracle_page
 from processor.classifier import rule_classify as classify
 from processor.summarizer import rule_based_summary
 from storage.database import finish_crawl_run, get_cached_classification, start_crawl_run, upsert_update
@@ -26,6 +28,73 @@ log = logging.getLogger(__name__)
 # Optional callback: called whenever new updates are stored
 # Signature: (new_count: int) -> None
 _on_new_updates: Optional[Callable[[int], None]] = None
+
+
+def _follow_hcm_detail_links(
+    parent_records: list[dict],
+    source_name: str,
+    category: str,
+    service: str,
+    doc_type: str,
+) -> tuple[int, int]:
+    """
+    For each HCM hub record that embeds detail-page links in its content
+    (stored as "description — Links: url1, url2, url3"), fetch those pages
+    and parse their feature headings as child records.
+
+    Child records are titled "{parent_title} — {feature_name}" so the UI
+    "Features in this Release" block picks them up automatically.
+
+    Returns (total_found, total_new).
+    """
+    found = 0
+    new   = 0
+
+    for rec in parent_records:
+        content = rec.get("content", "")
+        m = re.search(r"— Links: (.+)$", content)
+        if not m:
+            continue
+
+        raw_urls     = [u.strip() for u in m.group(1).split(",") if u.strip()]
+        parent_title = rec["title"]
+        parent_url   = rec.get("source_url", "")
+
+        for url in raw_urls[:3]:   # cap: 3 detail pages per hub record
+            if not url.startswith("http"):
+                url = urljoin(parent_url, url)
+
+            html, page_date = fetch_page(url)
+            if not html:
+                log.warning("  HCM detail link unreachable: %s", url)
+                continue
+
+            child_records = parse_hcm_detail_page(
+                html, parent_title, url, source_name, category, service, doc_type
+            )
+            # Apply page date as fallback for child records with no date
+            if page_date:
+                for cr in child_records:
+                    if not cr.get("release_date"):
+                        cr["release_date"] = page_date
+
+            for child_rec in child_records:
+                cached = get_cached_classification(source_name, child_rec["title"])
+                if cached:
+                    child_rec.update(cached)
+                if not child_rec.get("impact_level"):
+                    child_rec = classify(child_rec)
+                if not child_rec.get("summary"):
+                    child_rec["summary"] = rule_based_summary(
+                        child_rec["title"], child_rec["content"]
+                    )
+
+                _stored, is_new = upsert_update(child_rec)
+                found += 1
+                if is_new:
+                    new += 1
+
+    return found, new
 
 
 def register_update_callback(fn: Callable[[int], None]) -> None:
@@ -61,7 +130,7 @@ def run_crawl(seed_mock: bool = True) -> dict:
         service  = meta["service"]
         doc_type = meta["doc_type"]
 
-        html = fetch_page(url)
+        html, page_date = fetch_page(url)
         sources_done += 1
 
         if not html:
@@ -72,7 +141,8 @@ def run_crawl(seed_mock: bool = True) -> dict:
         save_raw_page(source_name, url, html, category)
 
         records = parse_oracle_page(
-            html, source_name, url, category, service, doc_type
+            html, source_name, url, category, service, doc_type,
+            page_date=page_date,
         )
         log.info("  %s → %d items parsed", source_name, len(records))
 
@@ -93,7 +163,38 @@ def run_crawl(seed_mock: bool = True) -> dict:
             if is_new:
                 total_new += 1
 
-    # ── Mock/seed fallback ─────────────────────────────────────────────────────
+        # For HCM What's New hub records, follow embedded detail-page links
+        # to harvest individual feature entries (e.g. new Position fields).
+        if category == "HCM" and doc_type == "whats_new":
+            log.info("  %s — following HCM detail links …", source_name)
+            d_found, d_new = _follow_hcm_detail_links(
+                records, source_name, category, service, doc_type
+            )
+            total_found += d_found
+            total_new   += d_new
+            log.info("  %s — detail pages: %d found, %d new", source_name, d_found, d_new)
+
+    # ── HCM What's New mock seeding ───────────────────────────────────────────
+    # The Oracle HCM readiness hub page is permanently JS-rendered and never
+    # returns module-level detail data. Always ensure the HCM whats_new mock
+    # records (including per-feature child records) are present in the DB.
+    # upsert_update deduplicates by title_key, so re-running is safe.
+    if seed_mock:
+        for mock_rec in get_mock_records():
+            if (mock_rec.get("category") == "HCM"
+                    and mock_rec.get("doc_type") == "whats_new"):
+                if not mock_rec.get("impact_level"):
+                    mock_rec = classify(mock_rec)
+                if not mock_rec.get("summary"):
+                    mock_rec["summary"] = rule_based_summary(
+                        mock_rec["title"], mock_rec["content"]
+                    )
+                _stored, is_new = upsert_update(mock_rec)
+                total_found += 1
+                if is_new:
+                    total_new += 1
+
+    # ── Full mock/seed fallback (all sources failed) ───────────────────────────
     if not any_real and seed_mock:
         log.info("No live pages fetched — seeding mock data")
         mock_records = get_mock_records()
