@@ -43,6 +43,19 @@ class OracleUpdate(Base):
     title_key     = Column(String(64),  nullable=True, index=True)
     version_count = Column(Integer,     default=1)        # how many versions exist
 
+    # ── Manual review flag ────────────────────────────────────────────────────
+    # Set by the user via the UI when a change requires internal attention.
+    # flag_note can hold a Jira URL, description, or any free-text annotation.
+    is_flagged    = Column(Boolean,     default=False,    nullable=True)
+    flag_note     = Column(Text,        nullable=True)
+
+    # ── User overrides (persisted across crawls) ──────────────────────────────
+    # impact_overridden: True means the user has manually set impact_level,
+    # so the crawler must NOT overwrite it on future upserts.
+    impact_overridden = Column(Boolean, default=False, nullable=True)
+    # user_comment: free-text note from the user, independent of flag.
+    user_comment      = Column(Text,    nullable=True)
+
     # ── Tag helpers ───────────────────────────────────────────────────────────
     @property
     def tags(self) -> list[str]:
@@ -76,6 +89,10 @@ class OracleUpdate(Base):
             "is_new":        self.is_new,
             "title_key":     self.title_key,
             "version_count": self.version_count or 1,
+            "is_flagged":         bool(self.is_flagged),
+            "flag_note":          self.flag_note or "",
+            "impact_overridden":  bool(self.impact_overridden),
+            "user_comment":       self.user_comment or "",
         }
 
     def __repr__(self) -> str:

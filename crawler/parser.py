@@ -477,6 +477,245 @@ def _try_hcm_readiness(soup: BeautifulSoup) -> list[dict]:
     return items
 
 
+def parse_hcm_hub_modules(html: str) -> list[dict]:
+    """
+    Extract the HCM module list from the embedded JSON inside hcm.html.
+
+    hcm.html is fully JS-rendered but the server inlines a JavaScript variable
+    that contains a JSON-like array of all module entries, e.g.:
+        {"title": "Payroll What's New 26B", "html": "hcm/26b/payr-26b/index.html", "position": 23}
+
+    Returns a list of {"title": ..., "path": ...} dicts.
+    """
+    import json as _json
+
+    if not html:
+        return []
+
+    soup = BeautifulSoup(html, "lxml")
+    modules: list[dict] = []
+    seen: set[str]      = set()
+
+    for script in soup.find_all("script"):
+        text = script.string or ""
+        if '"hcm/' not in text:
+            continue
+
+        # Each module object looks like: {"title":"...","html":"hcm/...","position":N}
+        # They may be nested in a larger array or JS assignment.
+        for m in re.finditer(
+            r'\{[^{}]*?"html"\s*:\s*"(hcm/[^"]+\.html)"[^{}]*?\}',
+            text,
+            re.DOTALL,
+        ):
+            obj_str = m.group(0)
+            path    = m.group(1)
+            if path in seen:
+                continue
+            # Try proper JSON parse first
+            try:
+                entry = _json.loads(obj_str)
+                title = entry.get("title", "")
+            except _json.JSONDecodeError:
+                title_m = re.search(r'"title"\s*:\s*"([^"]+)"', obj_str)
+                title   = title_m.group(1) if title_m else ""
+
+            if title and path:
+                seen.add(path)
+                modules.append({"title": title, "path": path})
+
+    log.info("HCM hub: found %d modules", len(modules))
+    return modules
+
+
+def parse_hcm_toc(html: str, toc_url: str) -> list[str]:
+    """
+    Parse an HCM module toc.htm and return feature page URLs.
+
+    toc.htm contains <a href="..."> links pointing to individual feature pages
+    (e.g. "26B-payroll-wn-f12345.htm").  Relative URLs are resolved against
+    *toc_url* (the URL used to fetch this page).
+    """
+    from urllib.parse import urljoin
+
+    if not html:
+        return []
+
+    soup = BeautifulSoup(html, "lxml")
+    urls: list[str] = []
+    seen: set[str]  = set()
+
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        # Strip fragment (#anchor) — toc.htm links use "file.htm#anchor-id"
+        if "#" in href:
+            href = href.split("#", 1)[0]
+        if not href:
+            continue
+        # Only feature .htm links, not the toc itself or index
+        if not href.endswith(".htm"):
+            continue
+        if href.endswith("toc.htm") or href.endswith("index.htm"):
+            continue
+        full = urljoin(toc_url, href)
+        if full not in seen:
+            seen.add(full)
+            urls.append(full)
+
+    log.info("HCM toc: %d feature URLs from %s", len(urls), toc_url)
+    return urls
+
+
+def parse_hcm_feature_page(
+    html: str,
+    parent_title: str,
+    source_url: str,
+    source_name: str,
+    category: str,
+    service: str,
+    doc_type: str,
+) -> Optional[dict]:
+    """
+    Parse one Oracle HCM feature readiness page.
+
+    Oracle readiness pages embed the feature title in a Schema.org JSON-LD
+    block (<script type="application/ld+json">), e.g.:
+        {"@type":"WebPage","name":"Prior Salary and Graph Section...","datePublished":"2026-02-26"}
+
+    Fallback chain for title extraction:
+      1. Schema.org JSON-LD  "name"  field
+      2. <meta name="dcterms.title"> content
+      3. <title> HTML tag
+      4. <h1> text
+
+    Release code is extracted from dcterms.release meta → parent_title → URL.
+
+    The record is titled "{parent_title} — {feature_title}" so the UI
+    "Features in this Release" tree picks it up automatically.
+
+    Returns a record dict or None if the page cannot be parsed.
+    """
+    import json as _json
+
+    if not html:
+        return None
+
+    soup = BeautifulSoup(html, "lxml")
+
+    def _meta(name: str) -> str:
+        tag = soup.find("meta", attrs={"name": name})
+        return (tag.get("content") or "").strip() if tag else ""
+
+    # ── Title extraction (priority order) ─────────────────────────────────
+    feat_title  = ""
+    date_from_ld = None
+
+    # 1. Schema.org JSON-LD — most reliable on Oracle readiness pages
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = _json.loads(script.string or "")
+            name = data.get("name", "").strip()
+            if name and len(name) > 4:
+                feat_title = name
+                # Also grab datePublished as a date hint
+                dp = data.get("datePublished", "")
+                if dp:
+                    try:
+                        date_from_ld = datetime.strptime(dp[:10], "%Y-%m-%d")
+                    except ValueError:
+                        pass
+                break
+        except Exception:
+            pass
+
+    # 2. dcterms.title meta
+    if not feat_title:
+        feat_title = _meta("dcterms.title")
+
+    # 3. <title> HTML tag
+    if not feat_title:
+        title_tag = soup.find("title")
+        if title_tag:
+            feat_title = _clean(title_tag.get_text())
+
+    # 4. <h1> text
+    if not feat_title:
+        h1 = soup.find("h1")
+        feat_title = _clean(h1.get_text()) if h1 else ""
+
+    if not feat_title:
+        return None
+
+    # ── Release code + date ────────────────────────────────────────────────
+    release_raw  = _meta("dcterms.release")   # e.g. "26A"
+    created_str  = _meta("dcterms.created")   # e.g. "2026-02-26 17:08:11"
+
+    release_date, release_code = _parse_oracle_release(release_raw)
+    # Derive from parent_title if not in meta (e.g. "HCM — Payroll What's New 26A")
+    if not release_code:
+        _, release_code = _parse_oracle_release(parent_title)
+    # Derive from URL as last resort (e.g. ".../26a/comp-26a/...")
+    if not release_code:
+        url_m = re.search(r"/(\d{2}[A-D])/", source_url, re.IGNORECASE)
+        if url_m:
+            _, release_code = _parse_oracle_release(url_m.group(1))
+    if release_code and not release_date:
+        release_date, _ = _parse_oracle_release(release_code)
+
+    # Date fallbacks: JSON-LD datePublished → dcterms.created
+    if not release_date and date_from_ld:
+        release_date = date_from_ld
+    if not release_date and created_str:
+        try:
+            release_date = datetime.strptime(created_str[:10], "%Y-%m-%d")
+        except ValueError:
+            pass
+
+    # Build content from h2 sections
+    for noise in soup(["script", "style", "nav", "footer", "header"]):
+        noise.decompose()
+
+    sections: list[str] = []
+    for h2 in soup.find_all("h2")[:10]:
+        h_text = _clean(h2.get_text())
+        parts: list[str] = []
+        for sib in h2.next_siblings:
+            if not isinstance(sib, Tag):
+                continue
+            if sib.name == "h2":
+                break
+            t = _clean(sib.get_text())
+            if t:
+                parts.append(t)
+        body = " ".join(parts)[:600]
+        if h_text and body:
+            sections.append(f"{h_text}: {body}")
+
+    content = " | ".join(sections) if sections else _clean(soup.get_text())[:2000]
+    if not content:
+        content = feat_title
+
+    full_title = f"{parent_title} — {feat_title}"
+
+    return {
+        "source_name":  source_name,
+        "source_url":   source_url,
+        "category":     category,
+        "service":      service,
+        "doc_type":     doc_type,
+        "title":        full_title[:480],
+        "content":      content,
+        "summary":      None,
+        "_tags":        "[]",
+        "impact_level": None,
+        "release_date": release_date,
+        "release_code": release_code,
+        "content_hash": _make_hash(full_title, content, source_url),
+        "is_new":       True,
+        "vector_id":    None,
+    }
+
+
 def parse_hcm_detail_page(
     html: str,
     parent_title: str,

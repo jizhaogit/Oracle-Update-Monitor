@@ -34,11 +34,12 @@ UI_HTML = Path(__file__).parent.parent / "ui" / "index.html"
 from storage.database import (
     get_analysis_cache, save_analysis_cache,
     get_stats, get_update, get_updates_by_ids, get_versions,
-    list_crawl_runs, list_updates,
+    list_crawl_runs, list_updates, set_comment, set_flag, set_impact,
     get_distinct_categories, get_distinct_services, mark_all_seen,
 )
 from processor.summarizer import ask as qa_ask
 from processor.analyzer import analyze_impact
+from processor.jira_client import fetch_jira_issues_from_notes
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +69,16 @@ class AskRequest(BaseModel):
 class AnalyzeRequest(BaseModel):
     ids: list[int]
     force: bool = False   # True = regenerate even if cached
+
+class FlagRequest(BaseModel):
+    is_flagged: bool
+    note: str = ""        # Jira URL, reason, or any free-text annotation
+
+class ImpactRequest(BaseModel):
+    impact_level: Optional[str]   # "High" | "Medium" | "Low" | null (reset to auto)
+
+class CommentRequest(BaseModel):
+    comment: str = ""
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -117,6 +128,48 @@ def get_update_endpoint(update_id: int):
     if rec is None:
         raise HTTPException(status_code=404, detail="Update not found")
     return rec.to_dict()
+
+
+@app.post("/updates/{update_id}/impact")
+def override_impact(update_id: int, body: ImpactRequest):
+    """
+    Manually override (or reset) the impact level of a single update.
+
+    Body:
+        impact_level : "High" | "Medium" | "Low" | null  (null = reset to auto)
+    """
+    valid = {"High", "Medium", "Low", None}
+    if body.impact_level not in valid:
+        raise HTTPException(status_code=400,
+                            detail=f"impact_level must be one of {list(valid)}")
+    rec = set_impact(update_id, body.impact_level)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Update not found")
+    return rec
+
+
+@app.post("/updates/{update_id}/comment")
+def save_comment(update_id: int, body: CommentRequest):
+    """Save (or clear) a free-text user comment on a single update."""
+    rec = set_comment(update_id, body.comment)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Update not found")
+    return rec
+
+
+@app.post("/updates/{update_id}/flag")
+def flag_update(update_id: int, body: FlagRequest):
+    """
+    Set or clear the manual 'Needs Review' flag on a single update.
+
+    Body:
+        is_flagged : true to flag, false to clear
+        note       : optional free-text (Jira URL, reason, etc.)
+    """
+    rec = set_flag(update_id, body.is_flagged, body.note)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Update not found")
+    return rec
 
 
 @app.get("/categories")
@@ -185,14 +238,35 @@ def analyze_updates(body: AnalyzeRequest):
     if not records:
         raise HTTPException(status_code=404, detail="No updates found for given IDs")
 
+    # Pre-fetch any Jira issues linked via flag_note (fast — done before thread starts)
+    jira_issues: list = []
+    try:
+        jira_issues = fetch_jira_issues_from_notes(records)
+    except Exception as exc:
+        log.warning("Jira pre-fetch raised an exception (analysis continues): %s", exc)
+
+    # Separate into successful fetches and failures so the UI can warn clearly
+    jira_ok     = [j for j in jira_issues if not j.get("fetch_error")]
+    jira_failed = [{"key": j["key"], "url": j["url"], "error": j["fetch_error"]}
+                   for j in jira_issues if j.get("fetch_error")]
+
+    if jira_ok:
+        log.info("Jira context loaded for: %s", [j["key"] for j in jira_ok])
+    if jira_failed:
+        log.warning("Jira fetch failed for: %s", [(j["key"], j["error"]) for j in jira_failed])
+
     # Start background job so the HTTP request returns immediately
     job_id = str(uuid.uuid4())
-    _analyze_jobs[job_id] = {"status": "running", "analysis": None,
-                              "from_cache": False, "generated_at": None, "error": None}
+    _analyze_jobs[job_id] = {
+        "status": "running", "analysis": None,
+        "from_cache": False, "generated_at": None, "error": None,
+        "jira_keys":    [j["key"] for j in jira_ok],
+        "jira_failed":  jira_failed,
+    }
 
     def _run():
         try:
-            analysis = analyze_impact(records)
+            analysis = analyze_impact(records, jira_issues=jira_issues or None)
             generated_at = None
             try:
                 saved = save_analysis_cache(body.ids, analysis)
@@ -207,7 +281,12 @@ def analyze_updates(body: AnalyzeRequest):
             _analyze_jobs[job_id].update({"status": "error", "error": str(exc)})
 
     threading.Thread(target=_run, name=f"analyze-{job_id[:8]}", daemon=True).start()
-    return {"job_id": job_id, "status": "running"}
+    return {
+        "job_id":       job_id,
+        "status":       "running",
+        "jira_keys":    [j["key"] for j in jira_ok],
+        "jira_failed":  jira_failed,
+    }
 
 
 @app.get("/analyze/{job_id}")
@@ -223,6 +302,33 @@ def get_analyze_job(job_id: str):
 def get_update_versions(update_id: int):
     """Return all historical snapshots for one update."""
     return get_versions(update_id)
+
+
+@app.get("/jira-test")
+def jira_test(url: str = Query(..., description="Full Jira browse URL to test")):
+    """
+    Diagnostic endpoint — test whether a Jira ticket can be fetched.
+    Example: GET /jira-test?url=https://jira.tssi.ca/browse/BGCO-4817
+    """
+    from processor.jira_client import _extract_urls, fetch_jira_issue
+    matches = _extract_urls(url)
+    if not matches:
+        raise HTTPException(status_code=400, detail="No Jira browse URL detected in input")
+    base_url, key = matches[0]
+    issue = fetch_jira_issue(base_url, key)
+    return {
+        "key":           issue["key"],
+        "url":           issue["url"],
+        "fetch_error":   issue.get("fetch_error"),
+        "summary":       issue.get("summary"),
+        "status":        issue.get("status"),
+        "description_preview": (issue.get("description") or "")[:400],
+        "comment_count": len(issue.get("comments") or []),
+        "comments_preview": [
+            {"author": c["author"], "body": c["body"][:200]}
+            for c in (issue.get("comments") or [])
+        ],
+    }
 
 
 @app.get("/conclusion")

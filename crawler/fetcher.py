@@ -16,7 +16,7 @@ from urllib3.util.retry import Retry
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from config import MAX_RETRIES, REQUEST_DELAY, REQUEST_TIMEOUT
+from config import HTTP_PROXY, HTTPS_PROXY, MAX_RETRIES, REQUEST_DELAY, REQUEST_TIMEOUT, VERIFY_SSL
 
 log = logging.getLogger(__name__)
 
@@ -40,8 +40,57 @@ _HEADERS = {
 _last_request_time: float = 0.0
 
 
+def _is_pac_url(url: str) -> bool:
+    lower = url.lower()
+    last_segment = lower.rstrip("/").split("/")[-1]
+    return last_segment.endswith(".pac") or last_segment.endswith(".dat")
+
+
 def _build_session() -> requests.Session:
-    session = requests.Session()
+    raw_proxy = HTTPS_PROXY or HTTP_PROXY
+
+    # ── Session creation ───────────────────────────────────────────────────
+    if raw_proxy and _is_pac_url(raw_proxy):
+        # PAC file — use PACSession so each request is routed correctly,
+        # exactly as a browser would (PAC files can return different proxies
+        # for different target URLs).
+        try:
+            from pypac import PACSession, get_pac
+            log.info("Fetching PAC file: %s", raw_proxy)
+            pac = get_pac(url=raw_proxy)
+            if pac:
+                session = PACSession(pac)
+                log.info("Using PAC-aware session — proxy resolved per request")
+            else:
+                log.warning(
+                    "PAC file at %s could not be fetched — falling back to direct connection. "
+                    "If crawl times out, check that the PAC server is reachable on your VPN.",
+                    raw_proxy,
+                )
+                session = requests.Session()
+                session.trust_env = False
+        except ImportError:
+            log.warning(
+                "pypac is not installed — PAC file proxy will be ignored. "
+                "Run: runtime\\python.exe -m pip install pypac"
+            )
+            session = requests.Session()
+            session.trust_env = False
+
+    elif raw_proxy:
+        # Plain proxy URL (e.g. http://proxy.corp.com:8080)
+        session = requests.Session()
+        session.trust_env = False
+        session.proxies.update({"http": raw_proxy, "https": raw_proxy})
+        log.info("Using proxy: %s", raw_proxy)
+
+    else:
+        # No proxy configured — direct connection
+        session = requests.Session()
+        session.trust_env = False
+        log.debug("No proxy configured — connecting directly")
+
+    # ── Retry adapter ──────────────────────────────────────────────────────
     retry = Retry(
         total=MAX_RETRIES,
         backoff_factor=1.5,
@@ -52,6 +101,14 @@ def _build_session() -> requests.Session:
     session.mount("https://", adapter)
     session.mount("http://",  adapter)
     session.headers.update(_HEADERS)
+
+    # ── SSL verification ──────────────────────────────────────────────────
+    if not VERIFY_SSL:
+        session.verify = False
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        log.warning("SSL verification DISABLED (VERIFY_SSL=false)")
+
     return session
 
 
@@ -62,7 +119,6 @@ def _parse_last_modified(header_value: str) -> Optional[datetime]:
     """Parse an HTTP Last-Modified header string into a datetime (UTC, tz-naive)."""
     try:
         dt = parsedate_to_datetime(header_value)
-        # Strip timezone so it's consistent with the rest of the app's naive datetimes
         return dt.replace(tzinfo=None)
     except Exception:
         return None

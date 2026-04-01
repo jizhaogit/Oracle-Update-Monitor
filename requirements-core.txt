@@ -5,6 +5,8 @@ requests>=2.31.0
 beautifulsoup4>=4.12.0
 lxml>=4.9.0
 fake-useragent>=1.4.0
+pypac>=0.15.0          # PAC file support for corporate VPN proxies
+requests-negotiate-sspi>=0.5.2  # Windows SSPI (NTLM/Kerberos) — silent Jira auth on VPN
 
 # Database
 sqlalchemy>=2.0.23

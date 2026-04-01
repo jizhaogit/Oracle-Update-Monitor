@@ -48,6 +48,15 @@ def init_db() -> None:
     _add_column_if_missing("analysis_cache", "generated_at", "DATETIME")
     # Columns added in v4 (Oracle release code)
     _add_column_if_missing("oracle_updates", "release_code", "VARCHAR(20)")
+    # Columns added in v5 (manual review flag)
+    _add_column_if_missing("oracle_updates", "is_flagged", "BOOLEAN DEFAULT 0")
+    _add_column_if_missing("oracle_updates", "flag_note",  "TEXT")
+    # Columns added in v6 (user overrides — survive crawl refreshes)
+    _add_column_if_missing("oracle_updates", "impact_overridden", "BOOLEAN DEFAULT 0")
+    _add_column_if_missing("oracle_updates", "user_comment",      "TEXT")
+
+    # Data migration v5 — re-classify UI/Redwood records Low → Medium
+    _backfill_ui_impact()
 
     log.info("Database initialised at %s", DATABASE_URL)
 
@@ -68,6 +77,57 @@ def _add_column_if_missing(table: str, column: str, col_type: str) -> None:
             )
             conn.commit()
             log.info("Migrated: added column %s.%s", table, column)
+
+
+def _backfill_ui_impact() -> None:
+    """
+    One-time idempotent migration: promote Low-impact records that contain
+    UI / new-feature keywords to Medium, and tag them as "Redwood UI".
+
+    Rules (applied to title + content, case-insensitive):
+      • Any of: "introduction", "redwood", "new experience", "redesigned",
+        "new section"  →  Low  becomes  Medium
+      • Any of: "redwood", "new experience"  →  adds "Redwood UI" tag
+      • Already High remains High (never downgraded).
+    """
+    import json as _json
+
+    _UI_MEDIUM_KW  = ["introduction", "redwood", "new experience",
+                      "redesigned", "new section"]
+    _UI_TAG_KW     = ["redwood", "new experience"]
+    _UI_TAG        = "Redwood UI"
+
+    with session_scope() as s:
+        rows = (
+            s.query(OracleUpdate)
+             .filter(OracleUpdate.impact_level == "Low")
+             .all()
+        )
+        promoted = 0
+        tagged   = 0
+        for rec in rows:
+            text = ((rec.title or "") + " " + (rec.content or "")).lower()
+
+            needs_medium = any(kw in text for kw in _UI_MEDIUM_KW)
+            needs_tag    = any(kw in text for kw in _UI_TAG_KW)
+
+            if needs_medium:
+                rec.impact_level = "Medium"
+                promoted += 1
+
+            if needs_tag:
+                try:
+                    tags = _json.loads(rec._tags or "[]")
+                    if _UI_TAG not in tags:
+                        tags.append(_UI_TAG)
+                        rec._tags = _json.dumps(tags)
+                        tagged += 1
+                except Exception:
+                    pass
+
+        if promoted or tagged:
+            log.info("UI backfill: %d records promoted Low→Medium, %d tagged '%s'",
+                     promoted, tagged, _UI_TAG)
 
 
 @contextmanager
@@ -173,11 +233,15 @@ def upsert_update(data: dict) -> tuple[dict, bool]:
             )
             s.add(snapshot)
 
-            # Update the main record to the new content
+            # Update the main record to the new content.
+            # User overrides (impact_overridden, is_flagged, flag_note, user_comment)
+            # are intentionally NOT touched — they survive crawl refreshes.
             existing.content       = data.get("content", existing.content)
             existing.summary       = data.get("summary")          # will be regenerated
             existing._tags         = data.get("_tags", existing._tags)
-            existing.impact_level  = data.get("impact_level", existing.impact_level)
+            # Only update impact if the user has NOT manually set it
+            if not existing.impact_overridden:
+                existing.impact_level = data.get("impact_level", existing.impact_level)
             existing.release_code  = data.get("release_code", existing.release_code)
             existing.content_hash  = data["content_hash"]
             existing.crawled_at    = datetime.utcnow()
@@ -373,3 +437,69 @@ def list_crawl_runs(limit: int = 20) -> list[dict]:
                   .order_by(CrawlRun.started_at.desc())
                   .limit(limit).all())
     return [r.to_dict() for r in rows]
+
+
+def set_impact(update_id: int, impact_level: Optional[str]) -> Optional[dict]:
+    """
+    Manually override the impact level of an update record.
+
+    Parameters
+    ----------
+    update_id    : the oracle_updates.id to update
+    impact_level : "High" | "Medium" | "Low" | None (None resets to auto-classify)
+
+    Returns the updated record dict, or None if not found.
+    """
+    valid = {"High", "Medium", "Low", None}
+    if impact_level not in valid:
+        raise ValueError(f"impact_level must be one of {valid}")
+    with session_scope() as s:
+        rec = s.query(OracleUpdate).filter(OracleUpdate.id == update_id).first()
+        if rec is None:
+            return None
+        rec.impact_level      = impact_level
+        # Mark as overridden so crawl upserts won't reset it.
+        # If impact_level is None (reset), clear the override flag too.
+        rec.impact_overridden = impact_level is not None
+    with session_scope() as s:
+        rec = s.query(OracleUpdate).filter(OracleUpdate.id == update_id).first()
+        return rec.to_dict() if rec else None
+
+
+def set_comment(update_id: int, comment: str) -> Optional[dict]:
+    """
+    Save a free-text user comment on an update record.
+    The comment is independent of the review flag and survives crawl refreshes.
+    """
+    with session_scope() as s:
+        rec = s.query(OracleUpdate).filter(OracleUpdate.id == update_id).first()
+        if rec is None:
+            return None
+        rec.user_comment = comment.strip()
+    with session_scope() as s:
+        rec = s.query(OracleUpdate).filter(OracleUpdate.id == update_id).first()
+        return rec.to_dict() if rec else None
+
+
+def set_flag(update_id: int, is_flagged: bool, note: str = "") -> Optional[dict]:
+    """
+    Set or clear the manual review flag on an update record.
+
+    Parameters
+    ----------
+    update_id  : the oracle_updates.id to update
+    is_flagged : True = flag for review, False = clear flag
+    note       : free-text annotation (Jira URL, reason, etc.)
+
+    Returns the updated record dict, or None if not found.
+    """
+    with session_scope() as s:
+        rec = s.query(OracleUpdate).filter(OracleUpdate.id == update_id).first()
+        if rec is None:
+            return None
+        rec.is_flagged = is_flagged
+        rec.flag_note  = note.strip() if is_flagged else ""
+    # Re-fetch outside the session (expire_on_commit=False keeps values)
+    with session_scope() as s:
+        rec = s.query(OracleUpdate).filter(OracleUpdate.id == update_id).first()
+        return rec.to_dict() if rec else None

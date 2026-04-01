@@ -35,6 +35,13 @@ def _fmt_updates(updates: list[dict]) -> str:
     parts = []
     for i, u in enumerate(updates, 1):
         content_excerpt = (u.get("content") or "")[:2500]
+        flag_note = (u.get("flag_note") or "").strip()
+        user_comment = (u.get("user_comment") or "").strip()
+        extra = ""
+        if flag_note:
+            extra += f"Team Flag Note: {flag_note}\n"
+        if user_comment:
+            extra += f"Team Comment: {user_comment}\n"
         parts.append(
             f"[Update {i}]\n"
             f"Title: {u.get('title', 'N/A')}\n"
@@ -42,12 +49,35 @@ def _fmt_updates(updates: list[dict]) -> str:
             f"Impact Level: {u.get('impact_level', 'Unknown')}\n"
             f"Summary: {u.get('summary') or '(none)'}\n"
             f"Tags: {', '.join(u.get('tags') or []) or '(none)'}\n"
+            f"{extra}"
             f"Content:\n{content_excerpt}"
         )
     return "\n\n---\n\n".join(parts)
 
 
-def _llm_analyze(updates: list[dict]) -> str | None:
+def _fmt_jira_context(jira_issues: list[dict]) -> str:
+    """Render fetched Jira issues into a context block for the LLM prompt.
+    Issues that could not be fetched are skipped (caller handles them separately)."""
+    parts = []
+    for issue in jira_issues:
+        if issue.get("fetch_error"):
+            continue   # exclude failed fetches from LLM context
+        comments_block = ""
+        for c in issue.get("comments") or []:
+            comments_block += f"  [{c['author']}]: {c['body']}\n"
+        parts.append(
+            f"[Jira {issue['key']}] {issue['summary']}\n"
+            f"URL: {issue['url']}\n"
+            f"Type: {issue.get('issue_type','')} | "
+            f"Status: {issue.get('status','')} | "
+            f"Priority: {issue.get('priority','')}\n"
+            f"Description:\n{issue.get('description') or '(no description)'}\n"
+            + (f"Recent Comments:\n{comments_block}" if comments_block else "")
+        )
+    return "\n\n---\n\n".join(parts) if parts else ""
+
+
+def _llm_analyze(updates: list[dict], jira_issues: list[dict] | None = None) -> str | None:
     """Call the configured LLM to produce structured upgrade guidance.
     Runs as a blocking call — callers must run this in a background thread if needed."""
     try:
@@ -58,10 +88,32 @@ def _llm_analyze(updates: list[dict]) -> str | None:
         if llm is None:
             return None
 
+        # Only count tickets we actually have content for
+        good_jira = [j for j in (jira_issues or []) if not j.get("fetch_error")]
+        has_jira  = bool(good_jira)
+
+        jira_instruction = ""
+        if has_jira:
+            jira_instruction = (
+                "\n\nYou have also been provided with one or more **Jira tickets** that "
+                "your team has linked to these Oracle updates. These tickets describe "
+                "the team's internal concern, question, or investigation about the update.\n\n"
+                "**IMPORTANT:** Tailor your analysis specifically to answer what the "
+                "Jira ticket is asking. For each ticket:\n"
+                "  - Directly address the concern or question raised in the ticket.\n"
+                "  - Explain whether the Oracle update resolves, worsens, or is unrelated "
+                "to the ticket's concern.\n"
+                "  - If the ticket proposes a solution, evaluate whether that solution is "
+                "still valid given the Oracle update.\n"
+                "  - Reference the Jira ticket key (e.g. BGCO-1234) explicitly in your "
+                "response where relevant.\n"
+            )
+
         system = (
             "You are a senior Oracle Cloud architect advising development teams on how "
-            "to react to Oracle OCI/OIC documentation updates.\n\n"
-            "For each update provided, produce a structured analysis:\n\n"
+            "to react to Oracle OCI/OIC documentation updates."
+            + jira_instruction +
+            "\n\nFor each Oracle update provided, produce a structured analysis:\n\n"
             "1. **Impact Summary** — one sentence describing what changed.\n"
             "2. **Action Required** — Yes / No / N/A\n"
             "   - Yes  → the update may break or require changes to existing code, "
@@ -76,15 +128,24 @@ def _llm_analyze(updates: list[dict]) -> str | None:
             "   - Old behaviour vs new behaviour\n"
             "   - Example code or configuration snippets where helpful\n"
             "   - Deadline or migration window if mentioned\n"
-            "4. **Affected Areas** — APIs / SDKs / Console / CLI / Terraform / etc.\n\n"
-            "If multiple updates are provided, analyse each one separately with a clear "
+            "4. **Affected Areas** — APIs / SDKs / Console / CLI / Terraform / etc.\n"
+            + ("5. **Jira Ticket Response** — for each linked Jira ticket, directly "
+               "answer the concern raised and recommend a course of action.\n"
+               if has_jira else "") +
+            "\nIf multiple updates are provided, analyse each one separately with a clear "
             "heading, then add a combined **Summary Table** at the end.\n\n"
             "Use Markdown formatting. Be specific and actionable."
         )
 
+        updates_block = _fmt_updates(updates)
+        jira_block = (
+            f"\n\n---\n\n## Linked Jira Tickets\n\n{_fmt_jira_context(good_jira)}"
+            if has_jira else ""
+        )
+
         user = (
             "Please analyse the following Oracle Cloud update(s) and produce upgrade "
-            f"guidance my team can act on today:\n\n{_fmt_updates(updates)}"
+            f"guidance my team can act on today:\n\n{updates_block}{jira_block}"
         )
 
         resp = llm.invoke([SystemMessage(content=system), HumanMessage(content=user)])
@@ -125,7 +186,7 @@ def _llm_status_note() -> str:
     return "> **Note:** LLM call failed. Check `logs/oracle_monitor.log` for details."
 
 
-def _rule_based_analyze(updates: list[dict]) -> str:
+def _rule_based_analyze(updates: list[dict], jira_issues: list[dict] | None = None) -> str:
     """
     Keyword-driven fallback analysis — always available without an LLM.
     Produces a Markdown report specific to each update's actual content.
@@ -211,22 +272,56 @@ def _rule_based_analyze(updates: list[dict]) -> str:
         "Configure an LLM provider in `.env` for AI-generated code-level guidance.*\n\n"
         "---\n\n"
     )
+    jira_section = ""
+    if jira_issues:
+        good   = [j for j in jira_issues if not j.get("fetch_error")]
+        failed = [j for j in jira_issues if j.get("fetch_error")]
+        jira_lines = []
+        for issue in good:
+            status = f" [{issue.get('status')}]" if issue.get("status") else ""
+            jira_lines.append(
+                f"- **[{issue['key']}]({issue['url']})**{status}: "
+                f"{issue.get('summary') or '(no summary)'}"
+            )
+            if issue.get("description"):
+                jira_lines.append(
+                    f"  > {issue['description'][:300].replace(chr(10), ' ')}"
+                )
+        for issue in failed:
+            jira_lines.append(
+                f"- ⚠ **[{issue['key']}]({issue['url']})** — "
+                f"could not be fetched: `{issue['fetch_error']}`"
+            )
+        note = (
+            "> *Full ticket content was used to tailor the analysis above.*"
+            if good else
+            "> ⚠ *Jira ticket(s) could not be fetched — see errors below. "
+            "Ensure you are on VPN, have Jira read access, and "
+            "`requests-negotiate-sspi` is installed.*"
+        )
+        jira_section = (
+            "\n\n---\n\n## 🎫 Linked Jira Tickets\n\n"
+            + note + "\n\n"
+            + "\n".join(jira_lines)
+        )
+
     footer = f"\n\n---\n\n{llm_note}" if llm_note.strip() else ""
-    return header + "\n\n---\n\n".join(sections) + footer
+    return header + "\n\n---\n\n".join(sections) + jira_section + footer
 
 
-def analyze_impact(updates: list[dict]) -> str:
+def analyze_impact(updates: list[dict], jira_issues: list[dict] | None = None) -> str:
     """
     Analyse a list of Oracle update records and return Markdown upgrade guidance.
 
     Tries the configured LLM first; falls back to rule-based analysis.
+    Jira issues (pre-fetched by the caller) are woven into the prompt / output.
     """
     if not updates:
         return "No updates provided for analysis."
 
     if LLM_PROVIDER in ("openai", "anthropic", "bedrock", "ollama"):
-        result = _llm_analyze(updates)
+        result = _llm_analyze(updates, jira_issues=jira_issues)
         if result:
             return result
 
-    return _rule_based_analyze(updates)
+    return _rule_based_analyze(updates, jira_issues=jira_issues)
