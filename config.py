@@ -5,6 +5,7 @@ All settings are read from environment variables (or .env file).
 Sensible defaults allow the app to run out-of-the-box.
 """
 
+import configparser
 import logging
 import os
 from pathlib import Path
@@ -29,94 +30,159 @@ for _d in [DATA_DIR, DB_DIR, FILES_DIR, RAW_DIR, LOGS_DIR]:
 DATABASE_URL = f"sqlite:///{DB_DIR}/oracle_monitor.db"
 
 # ── Oracle URLs to monitor ─────────────────────────────────────────────────────
-# Each entry: display_name → {url, category, service, type}
-ORACLE_SOURCES: dict[str, dict] = {
-    # HCM first — REST API records are pre-classified (no LLM), so they store quickly
-    "HCM — REST API Usage": {
-        "url": "https://docs.oracle.com/en/cloud/saas/human-resources/index.html",
-        "category": "HCM",
-        "service": "REST API Usage",
-        "doc_type": "reference",
-    },
-    "HCM — What's New": {
-        "url": "https://docs.oracle.com/en/cloud/saas/readiness/hcm.html",
-        "category": "HCM",
-        "service": "Human Capital Management",
-        "doc_type": "whats_new",
-    },
-    "HCM — REST API Endpoints": {
-        "url": "https://docs.oracle.com/en/cloud/saas/human-resources/farws/rest-endpoints.html",
-        "category": "HCM",
-        "service": "REST API",
-        "doc_type": "release_notes",
-    },
-    "OCI — What's New": {
-        "url": "https://docs.oracle.com/en-us/iaas/Content/servicechanges.htm",
-        "category": "OCI",
-        "service": "General",
-        "doc_type": "whats_new",
-    },
-    "OCI — Release Notes (All)": {
-        "url": "https://docs.oracle.com/en-us/iaas/releasenotes/",
-        "category": "OCI",
-        "service": "General",
-        "doc_type": "release_notes",
-    },
-    "OCI — Compute": {
-        "url": "https://docs.oracle.com/en-us/iaas/releasenotes/changes/compute/",
-        "category": "OCI",
-        "service": "Compute",
-        "doc_type": "release_notes",
-    },
-    "OCI — Networking": {
-        "url": "https://docs.oracle.com/en-us/iaas/releasenotes/changes/network/",
-        "category": "OCI",
-        "service": "Networking",
-        "doc_type": "release_notes",
-    },
-    "OCI — Database": {
-        "url": "https://docs.oracle.com/en-us/iaas/releasenotes/changes/database/",
-        "category": "OCI",
-        "service": "Database",
-        "doc_type": "release_notes",
-    },
-    "OCI — Storage": {
-        "url": "https://docs.oracle.com/en-us/iaas/releasenotes/changes/storage/",
-        "category": "OCI",
-        "service": "Storage",
-        "doc_type": "release_notes",
-    },
-    "OCI — Security": {
-        "url": "https://docs.oracle.com/en-us/iaas/releasenotes/changes/security/",
-        "category": "OCI",
-        "service": "Security",
-        "doc_type": "release_notes",
-    },
-    "OCI — Analytics": {
-        "url": "https://docs.oracle.com/en-us/iaas/releasenotes/changes/analytics/",
-        "category": "OCI",
-        "service": "Analytics",
-        "doc_type": "release_notes",
-    },
-    "OCI — Containers & Kubernetes": {
-        "url": "https://docs.oracle.com/en-us/iaas/releasenotes/changes/containers/",
-        "category": "OCI",
-        "service": "Containers",
-        "doc_type": "release_notes",
-    },
-    "OIC — What's New": {
-        "url": "https://docs.oracle.com/en/cloud/paas/integration-cloud/whats-new/",
-        "category": "OIC",
-        "service": "Integration",
-        "doc_type": "whats_new",
-    },
-    "OIC — Release Notes": {
-        "url": "https://docs.oracle.com/en/cloud/paas/integration-cloud/release-notes/",
-        "category": "OIC",
-        "service": "Integration",
-        "doc_type": "release_notes",
-    },
-}
+# Loaded from sources.ini (auto-created on first run).
+# Users can edit that file with Notepad — no code changes needed.
+
+SOURCES_FILE = BASE_DIR / "sources.ini"
+
+_DEFAULT_SOURCES_INI = """\
+# Oracle Update Monitor — Source URLs
+# ─────────────────────────────────────────────────────────────────────────────
+# Edit this file to add, remove, or disable the URLs the app crawls.
+# Restart the app after saving changes.
+#
+# Each [Section Name] becomes the display name shown in the UI.
+# Required fields:  url, category, service
+# Optional fields:
+#   type    = whats_new | release_notes | reference   (default: release_notes)
+#   enabled = true | false                            (default: true)
+#
+# To stop crawling a source without deleting it, set:  enabled = false
+# Lines starting with # are comments and are ignored.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── HCM ──────────────────────────────────────────────────────────────────────
+
+[HCM — REST API Usage]
+url      = https://docs.oracle.com/en/cloud/saas/human-resources/index.html
+category = HCM
+service  = REST API Usage
+type     = reference
+
+[HCM — What's New]
+url      = https://docs.oracle.com/en/cloud/saas/readiness/hcm.html
+category = HCM
+service  = Human Capital Management
+type     = whats_new
+
+[HCM — REST API Endpoints]
+url      = https://docs.oracle.com/en/cloud/saas/human-resources/farws/rest-endpoints.html
+category = HCM
+service  = REST API
+type     = release_notes
+
+# ── OCI ──────────────────────────────────────────────────────────────────────
+
+[OCI — What's New]
+url      = https://docs.oracle.com/en-us/iaas/Content/servicechanges.htm
+category = OCI
+service  = General
+type     = whats_new
+
+[OCI — Release Notes (All)]
+url      = https://docs.oracle.com/en-us/iaas/releasenotes/
+category = OCI
+service  = General
+type     = release_notes
+
+[OCI — Compute]
+url      = https://docs.oracle.com/en-us/iaas/releasenotes/changes/compute/
+category = OCI
+service  = Compute
+type     = release_notes
+
+[OCI — Networking]
+url      = https://docs.oracle.com/en-us/iaas/releasenotes/changes/network/
+category = OCI
+service  = Networking
+type     = release_notes
+
+[OCI — Database]
+url      = https://docs.oracle.com/en-us/iaas/releasenotes/changes/database/
+category = OCI
+service  = Database
+type     = release_notes
+
+[OCI — Storage]
+url      = https://docs.oracle.com/en-us/iaas/releasenotes/changes/storage/
+category = OCI
+service  = Storage
+type     = release_notes
+
+[OCI — Security]
+url      = https://docs.oracle.com/en-us/iaas/releasenotes/changes/security/
+category = OCI
+service  = Security
+type     = release_notes
+
+[OCI — Analytics]
+url      = https://docs.oracle.com/en-us/iaas/releasenotes/changes/analytics/
+category = OCI
+service  = Analytics
+type     = release_notes
+
+[OCI — Containers & Kubernetes]
+url      = https://docs.oracle.com/en-us/iaas/releasenotes/changes/containers/
+category = OCI
+service  = Containers
+type     = release_notes
+
+# ── OIC ──────────────────────────────────────────────────────────────────────
+
+[OIC — What's New]
+url      = https://docs.oracle.com/en/cloud/paas/integration-cloud/whats-new/
+category = OIC
+service  = Integration
+type     = whats_new
+
+[OIC — Release Notes]
+url      = https://docs.oracle.com/en/cloud/paas/integration-cloud/release-notes/
+category = OIC
+service  = Integration
+type     = release_notes
+
+# ── Add your own sources below ───────────────────────────────────────────────
+# Example:
+#
+# [My Custom Source]
+# url      = https://docs.oracle.com/en/cloud/paas/...
+# category = OIC
+# service  = My Service
+# type     = release_notes
+"""
+
+
+def _load_sources() -> dict[str, dict]:
+    """
+    Read SOURCES_FILE (sources.ini) and return the ORACLE_SOURCES dict.
+    If the file does not exist, write it from the built-in defaults first.
+    Sections with  enabled = false  are silently skipped.
+    """
+    if not SOURCES_FILE.exists():
+        SOURCES_FILE.write_text(_DEFAULT_SOURCES_INI, encoding="utf-8")
+
+    cp = configparser.RawConfigParser()
+    cp.optionxform = str          # preserve key case as written
+    cp.read(SOURCES_FILE, encoding="utf-8")
+
+    sources: dict[str, dict] = {}
+    for name in cp.sections():
+        sec = cp[name]
+        if sec.get("enabled", "true").strip().lower() in ("false", "0", "no"):
+            continue
+        url = sec.get("url", "").strip()
+        if not url:
+            continue
+        sources[name] = {
+            "url":      url,
+            "category": sec.get("category", "OCI").strip(),
+            "service":  sec.get("service",  "General").strip(),
+            "doc_type": sec.get("type",     "release_notes").strip(),
+        }
+    return sources
+
+
+ORACLE_SOURCES: dict[str, dict] = _load_sources()
 
 # Impact-level keywords used by the rule-based classifier
 IMPACT_KEYWORDS: dict[str, list[str]] = {

@@ -97,6 +97,8 @@ The tool is distributed as a **portable green package** — copy the folder to a
 | **Conclusion view** | Pick a single item via radio button and compare versions side-by-side |
 | **By Version grouping** | Sidebar groups items by Oracle release code (26A, 26B, …) by default |
 | **Appearance control** | Per-user font-size selector and background colour picker (saved in browser) |
+| **🤖 AI Search** | Natural-language sidebar search — the LLM expands your query into focused keywords, searches the database, and returns results ranked by relevance |
+| **Keyword highlighting** | When AI Search is active, the exact words you typed are highlighted in amber in the Detail View; AI-expanded terms appear in a subtle blue |
 | **Portable runtime** | Ships as a self-contained folder; `run.bat` downloads Python automatically |
 | **REST API** | Full FastAPI backend with interactive Swagger docs at `/docs` |
 
@@ -368,20 +370,42 @@ The left sidebar shows a collapsible tree. The default grouping is **By Version*
 - The **radio button** on each item marks it for the Conclusion / Analyze workflow.
 - Use the **Filter** box to search by title or summary within the tree.
 
+#### 🤖 AI Search
+
+Type a natural-language description into the search box and press **Enter** (or click **🤖 AI**) to trigger an AI-powered search.
+
+- The LLM converts your query into 4–7 specific keywords focused on what you are actually looking for — product names and generic module terms are deliberately excluded to avoid noise.
+- The database is searched for records matching **any** of those keywords (OR logic), and results are ranked by how many keywords matched.
+- Your raw query is also always searched as-is (including space-inserted variants of run-together words like `workinghours` → `working hours`).
+- Results respect the active **By Version / By Category** toggle and appear with all groups pre-expanded so every item is immediately clickable.
+- A row of keyword chips below the search box shows exactly which terms were used. Click **✕** to clear the AI search and return to the normal filter.
+- **Without an LLM configured** (`LLM_PROVIDER=none`), AI Search falls back to a plain word-split of your query — it still searches and ranks results, just without LLM keyword expansion.
+
 ### Detail View
 
 Clicking any item shows its full detail in the right panel:
 
 - **Header badges** — category, service, impact level (with ✎ if manually overridden), date, release code, 🖥 UI badge, 🚩 Flagged badge, 💬 Has Notes badge, NEW, and version count.
 - Clicking the **version badge** (e.g. `v3 — Compare Versions`) opens the Conclusion modal.
-- **Summary** — rule-based or AI-generated summary.
-- **Full Content** — original text from Oracle's documentation page (scrollable).
+- **Summary** — rule-based or AI-generated summary. When AI Search is active, matched keywords are highlighted (see below).
+- **Full Content** — original text from Oracle's documentation page (scrollable). When AI Search is active, matched keywords are highlighted.
 - **What's in this Update** — content broken into individual sentences for quick scanning.
 - **Tags** — automatically extracted service tags.
 - **View Source** — direct link to the Oracle documentation page.
 - **⚡ Override Impact Level** — manually set the impact level (see below).
 - **🚩 Flag for Review** — flag the item and link a Jira ticket (see below).
 - **💬 My Notes** — personal free-text notes (see below).
+
+### Keyword Highlighting (AI Search mode)
+
+When an AI Search is active and you open any result in the Detail View, the **Summary** and **Full Content** fields highlight matched terms with two distinct styles:
+
+| Highlight | Colour | What it marks |
+|---|---|---|
+| **Primary** | Amber / bold | The exact words you typed in the search box (your raw query) |
+| **Secondary** | Subtle blue | AI-expanded keywords that differ from what you typed |
+
+This makes it immediately clear **why** a result was included and where the relevant content is in the document. Generic product names (`Oracle`, `HCM`, `OIC`) are excluded from secondary highlights to avoid visual noise.
 
 ### Override Impact Level
 
@@ -462,9 +486,10 @@ Inside the Conclusion modal, **🧠 Analyze Impact & Upgrade Guide** runs an AI 
 1. **Impact Summary** — one sentence describing what changed.
 2. **Action Required** — Yes / No / N/A with explanation.
 3. **Upgrade Steps** (when action is required) — numbered, concrete steps with API/SDK/CLI specifics.
-4. **Affected Areas** — APIs, SDKs, Console, CLI, Terraform, etc.
-5. **Jira Ticket Response** — present only when a Jira ticket was successfully fetched (see below).
-6. **Summary Table** — at the end when multiple items are analysed together.
+4. **Affected Areas** — APIs, SDKs, Console, CLI, Terraform, HCM config, etc.
+5. **AI Suggestion** — independent recommendation based solely on Oracle's documentation: concrete next steps, best practices, risks, or opportunities the team may not have considered. Always present, regardless of Jira tickets.
+6. **Jira Ticket Response** — present only when a Jira ticket was successfully fetched. Directly answers the concern raised in the ticket and notes whether the team's current approach aligns with Oracle's documented intent.
+7. **Summary Table** — at the end when multiple items are analysed together.
 
 **Without an LLM** (`LLM_PROVIDER=none`), a keyword-based fallback analysis is produced with a note explaining how to enable full AI guidance.
 
@@ -547,6 +572,7 @@ The API is available at `http://127.0.0.1:8000`. Interactive documentation (Swag
 | `POST` | `/mark-seen` | Mark all new updates as seen |
 | `POST` | `/analyze` | Start async AI impact analysis — body: `{"ids": [1], "force": false}` |
 | `GET` | `/analyze/{job_id}` | Poll for the result of an async analyze job |
+| `POST` | `/search/ai` | AI-powered keyword search — body: `{"query": "..."}` — returns ranked results with expanded keywords |
 | `POST` | `/ask` | Q&A over stored documents — body: `{"question": "..."}` |
 
 **`/analyze` response includes Jira status:**
@@ -742,6 +768,15 @@ The app tries two auth methods in order:
 - Stop the server.
 - Delete `data/db/oracle_monitor.db`.
 - Restart — the database is rebuilt from scratch on the next crawl.
+
+**AI Search returns irrelevant results / highlights generic terms**
+- The LLM prompt explicitly forbids product names and module names — ensure you are running the latest `api/app.py`.
+- If `LLM_PROVIDER=none`, the search falls back to plain word-splitting (no AI expansion), which may return fewer focused results.
+- Run-together words like `workinghours` are automatically split into `working hours` and searched as an additional seed keyword — no spaces needed.
+
+**AI Search returns HTTP 500**
+- Restart the app — the `multi_keyword_search` function requires the latest `storage/database.py`.
+- Check `logs/oracle_monitor.log` for details.
 
 **Impact level I manually set was reset after a crawl**
 - This should not happen with the current code. Impact overrides set via the ⚡ panel set `impact_overridden=true` in the database, which the crawler checks before updating. If you see this, check that you are running the latest version and restart the app so the schema migration runs (`impact_overridden` column is added on startup).

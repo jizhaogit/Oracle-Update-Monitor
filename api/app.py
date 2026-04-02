@@ -34,7 +34,8 @@ UI_HTML = Path(__file__).parent.parent / "ui" / "index.html"
 from storage.database import (
     get_analysis_cache, save_analysis_cache,
     get_stats, get_update, get_updates_by_ids, get_versions,
-    list_crawl_runs, list_updates, set_comment, set_flag, set_impact,
+    list_crawl_runs, list_updates, multi_keyword_search,
+    set_comment, set_flag, set_impact,
     get_distinct_categories, get_distinct_services, mark_all_seen,
 )
 from processor.summarizer import ask as qa_ask
@@ -79,6 +80,9 @@ class ImpactRequest(BaseModel):
 
 class CommentRequest(BaseModel):
     comment: str = ""
+
+class AISearchRequest(BaseModel):
+    query: str
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -205,6 +209,117 @@ def mark_seen():
 def ask_question(body: AskRequest):
     answer = qa_ask(body.question)
     return {"question": body.question, "answer": answer}
+
+
+@app.post("/search/ai")
+def ai_search(body: AISearchRequest):
+    """
+    Semantic search using LLM query expansion.
+
+    The LLM converts the natural-language query into a list of specific
+    search keywords/phrases, then the database is searched for records
+    matching ANY of those keywords (OR logic).  Results are ranked by
+    how many keywords matched.
+
+    Falls back to plain word-splitting when no LLM is configured or the
+    LLM call fails.
+    """
+    from config import LLM_PROVIDER
+
+    query = body.query.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="query must not be empty")
+
+    keywords: list[str] = []
+    ai_available = False
+
+    # ── Always seed with the raw query first ──────────────────────────────────
+    # Split the raw query into words and add them as guaranteed seed keywords.
+    # Also try inserting a space before each capital/digit boundary so that
+    # run-together input like "workinghours" becomes "working hours".
+    import re as _re
+    seed: list[str] = []
+    seed.append(query)                                          # full phrase as-is
+    for w in query.split():
+        seed.append(w)
+        spaced = _re.sub(r'([a-z])([A-Z0-9])', r'\1 \2', w)   # camelCase split
+        spaced = _re.sub(r'([0-9])([a-zA-Z])', r'\1 \2', spaced)
+        if spaced != w:
+            seed.append(spaced)
+    seed = [s for s in seed if len(s) >= 2]
+
+    # ── LLM keyword expansion ──────────────────────────────────────────────────
+    if LLM_PROVIDER in ("openai", "anthropic", "bedrock", "ollama"):
+        try:
+            from processor.classifier import _get_llm
+            from langchain_core.messages import HumanMessage, SystemMessage
+            import json as _json
+
+            llm = _get_llm()
+            if llm:
+                system = (
+                    "You are a search assistant for an Oracle Cloud documentation tracker. "
+                    "The database holds update titles like: "
+                    "'New Position Fields: Working Hours and Frequency', "
+                    "'REST API endpoint deprecated', 'Payroll costing changes'.\n\n"
+                    "Given a user's search query, produce a JSON array of 4–7 SPECIFIC "
+                    "keywords or short phrases that would literally appear in the TITLE "
+                    "or summary of a matching document.\n\n"
+                    "STRICT RULES — violating these makes search worse:\n"
+                    "✓ DO include: specific feature names, field names, technical terms, "
+                    "   action verbs, direct synonyms of the core concept.\n"
+                    "✗ DO NOT include: product/platform names (Oracle, HCM, OCI, OIC, "
+                    "   Oracle Cloud, Fusion, etc.) — they match everything and add noise.\n"
+                    "✗ DO NOT include: module/category names (Payroll, Core HR, Workforce "
+                    "   Management, Employee Central, etc.) unless they are the specific "
+                    "   thing being searched for.\n"
+                    "✗ DO NOT include: generic verbs or adjectives (new, updated, enhanced, "
+                    "   improved, support, general).\n\n"
+                    "Think: what exact words would appear in the TITLE of the one document "
+                    "the user is looking for?\n"
+                    "Respond with ONLY the JSON array — no explanation, no markdown."
+                )
+                user = f"Search query: {query}"
+                resp = llm.invoke([SystemMessage(content=system),
+                                   HumanMessage(content=user)])
+                raw = resp.content.strip()
+                # Strip any markdown code fences the LLM may have added
+                for fence in ("```json", "```"):
+                    if raw.startswith(fence): raw = raw[len(fence):]
+                    if raw.endswith(fence):   raw = raw[:-len(fence)]
+                raw = raw.strip()
+                parsed = _json.loads(raw)
+                if isinstance(parsed, list):
+                    ai_kws = [str(k).strip() for k in parsed if str(k).strip()]
+                    # Merge: seed first (guarantees user input is always searched),
+                    # then AI additions de-duped
+                    seen_lower = {s.lower() for s in seed}
+                    for k in ai_kws:
+                        if k.lower() not in seen_lower:
+                            seed.append(k)
+                            seen_lower.add(k.lower())
+                    keywords = seed
+                    ai_available = True
+                    log.info("AI search expanded %r → %s", query, keywords)
+                else:
+                    log.warning("AI search: LLM returned non-list JSON: %r", parsed)
+        except Exception as exc:
+            log.warning("AI search LLM expansion failed (%s): %s", LLM_PROVIDER, exc)
+
+    # ── Fallback / no LLM: use seed keywords only ─────────────────────────────
+    if not keywords:
+        keywords = seed
+        log.info("AI search using seed keywords: %s", keywords)
+
+    results = multi_keyword_search(keywords, limit=80)
+
+    return {
+        "query":        query,
+        "keywords":     keywords,
+        "ai_available": ai_available,
+        "total":        len(results),
+        "results":      results,
+    }
 
 
 @app.post("/analyze")

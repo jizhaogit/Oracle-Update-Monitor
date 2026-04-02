@@ -113,8 +113,10 @@ def _llm_analyze(updates: list[dict], jira_issues: list[dict] | None = None) -> 
             "You are a senior Oracle Cloud architect advising development teams on how "
             "to react to Oracle OCI/OIC documentation updates."
             + jira_instruction +
-            "\n\nFor each Oracle update provided, produce a structured analysis:\n\n"
-            "1. **Impact Summary** — one sentence describing what changed.\n"
+            "\n\nFor each Oracle update provided, produce a structured analysis with "
+            "ALL of the following numbered sections:\n\n"
+            "1. **Impact Summary** — one sentence describing what changed in Oracle's "
+            "documentation.\n"
             "2. **Action Required** — Yes / No / N/A\n"
             "   - Yes  → the update may break or require changes to existing code, "
             "config, API calls, or endpoints.\n"
@@ -128,13 +130,36 @@ def _llm_analyze(updates: list[dict], jira_issues: list[dict] | None = None) -> 
             "   - Old behaviour vs new behaviour\n"
             "   - Example code or configuration snippets where helpful\n"
             "   - Deadline or migration window if mentioned\n"
-            "4. **Affected Areas** — APIs / SDKs / Console / CLI / Terraform / etc.\n"
-            + ("5. **Jira Ticket Response** — for each linked Jira ticket, directly "
-               "answer the concern raised and recommend a course of action.\n"
+            "4. **Affected Areas** — APIs / SDKs / Console / CLI / Terraform / HCM "
+            "configuration / etc.\n"
+            "5. **AI Suggestion** — based solely on Oracle's documentation, provide your "
+            "independent recommendation for what the team should do. This section must:\n"
+            "   - Stand on its own regardless of any internal tickets or team decisions.\n"
+            "   - Suggest concrete next steps, best practices, or configuration guidance "
+            "derived from the Oracle update content.\n"
+            "   - Flag any risks or opportunities that the team may not have considered "
+            "based on what Oracle's documentation says.\n"
+            "   - Be written as if you are advising the team for the first time, with no "
+            "knowledge of any internal discussions.\n"
+            + ("6. **Jira Ticket Response** — for each linked Jira ticket, directly "
+               "answer the concern raised and recommend a course of action. Reference "
+               "section 5 (AI Suggestion) where relevant, and note whether the team's "
+               "current approach aligns with Oracle's documented intent.\n"
                if has_jira else "") +
             "\nIf multiple updates are provided, analyse each one separately with a clear "
             "heading, then add a combined **Summary Table** at the end.\n\n"
-            "Use Markdown formatting. Be specific and actionable."
+            "Use Markdown formatting. Be specific and actionable. "
+            "Do NOT skip section 5 — it must always be present.\n\n"
+            "IMPORTANT — output the very first line of your response as exactly one of:\n"
+            "INTEGRATION_IMPACT: YES\n"
+            "INTEGRATION_IMPACT: NO\n"
+            "Choose YES if the update may require reviewing or updating Oracle Integration "
+            "Cloud (OIC) connections, REST/SOAP adapters, API endpoint calls, data flows, "
+            "triggers, scheduled orchestrations, or integration payloads/schemas. "
+            "Choose NO if the change is unrelated to OIC integrations (e.g. a pure HCM UI "
+            "change, documentation clarification, OCI infrastructure, or new opt-in feature "
+            "that does not alter existing behaviour). "
+            "Output ONLY that line first — no blank line before the rest of the content."
         )
 
         updates_block = _fmt_updates(updates)
@@ -186,6 +211,27 @@ def _llm_status_note() -> str:
     return "> **Note:** LLM call failed. Check `logs/oracle_monitor.log` for details."
 
 
+# Keywords that indicate the change may affect OIC integrations
+_INTEGRATION_KEYWORDS = [
+    "rest api", "rest endpoint", "soap", "wsdl", "adapter", "connector",
+    "integration", "orchestration", "trigger", "webhook", "payload",
+    "schema change", "api version", "endpoint url", "oauth", "access token",
+    "authentication change", "api deprecat", "endpoint deprecat",
+    "api removed", "api changed", "response format", "request format",
+    "field removed", "field renamed", "field added to response",
+    "breaking change", "migration required",
+]
+
+
+def _is_integration_related(updates: list[dict]) -> bool:
+    """Return True if any of the updates has content suggesting OIC integration impact."""
+    blob = " ".join(
+        f"{u.get('title','')} {u.get('summary','')} {u.get('content','')}"
+        for u in updates
+    ).lower()
+    return any(kw in blob for kw in _INTEGRATION_KEYWORDS)
+
+
 def _rule_based_analyze(updates: list[dict], jira_issues: list[dict] | None = None) -> str:
     """
     Keyword-driven fallback analysis — always available without an LLM.
@@ -222,13 +268,13 @@ def _rule_based_analyze(updates: list[dict], jira_issues: list[dict] | None = No
         if action_hits or impact == "high":
             kw_list = ", ".join(f"`{k}`" for k in action_hits[:4])
             signal_line = f"**Detected signals:** {kw_list}\n\n" if kw_list else ""
-            body = (
+            action_body = (
                 f"**Action Required: Yes**\n\n"
                 f"{signal_line}"
                 f"{tag_line}"
                 f"{excerpt_block}\n"
                 f"{link_line}"
-                f"**Recommended steps for `{title}`:**\n\n"
+                f"**Upgrade Steps:**\n\n"
                 f"1. Review the full update at the reference link above.\n"
                 f"2. Search your codebase for references to **{service}** "
                 f"{'APIs, SDK calls, or endpoints' if 'api' in blob or 'endpoint' in blob or 'sdk' in blob else 'configuration or integration points'} "
@@ -237,9 +283,18 @@ def _rule_based_analyze(updates: list[dict], jira_issues: list[dict] | None = No
                 f"4. Apply any schema, endpoint, or configuration changes described in the update.\n"
                 f"5. {'Deploy before any stated deadline.' if any(w in blob for w in ['deadline', 'by ', 'before ', 'migrate by']) else 'Monitor for issues after deployment.'}\n"
             )
+            ai_suggestion = (
+                f"**AI Suggestion:**\n\n"
+                f"Based on Oracle's documentation, this change carries a high impact signal "
+                f"(`{'`, `'.join(action_hits[:3]) if action_hits else impact}`). "
+                f"Prioritise reviewing this update against your current {service} configuration. "
+                f"Engage your {category} team to assess whether any live integrations, "
+                f"scheduled jobs, or API consumers depend on the affected behaviour. "
+                f"Consider raising an internal change request if modifications are needed.\n"
+            )
 
         elif info_hits or impact in ("low", "medium"):
-            body = (
+            action_body = (
                 f"**No action needed.**\n\n"
                 f"{tag_line}"
                 f"{excerpt_block}\n"
@@ -249,27 +304,50 @@ def _rule_based_analyze(updates: list[dict], jira_issues: list[dict] | None = No
                 f"Existing {category} integrations should continue working without modification.\n\n"
                 f"You may optionally explore the new capability at your own pace.\n"
             )
+            ai_suggestion = (
+                f"**AI Suggestion:**\n\n"
+                f"Oracle has introduced a new capability in `{service}`. "
+                f"While no immediate action is required, consider the following:\n\n"
+                f"- Review the feature at the reference link to understand how it may benefit "
+                f"your current {category} workflows.\n"
+                f"- If this is a UI or Redwood update, assess whether end-user training or "
+                f"documentation updates are appropriate.\n"
+                f"- If your team manages related configurations, confirm the defaults are "
+                f"acceptable or adjust them proactively.\n"
+            )
 
         else:
-            body = (
+            action_body = (
                 f"**Review Required**\n\n"
                 f"{tag_line}"
                 f"{excerpt_block}\n"
                 f"{link_line}"
                 f"Unable to determine impact automatically for `{title}`. "
-                f"Please review the full content to decide whether changes are needed in your {category} integration.\n"
+                f"Please review the full content to decide whether changes are needed "
+                f"in your {category} integration.\n"
+            )
+            ai_suggestion = (
+                f"**AI Suggestion:**\n\n"
+                f"This update could not be classified automatically. "
+                f"Assign a team member to read the full Oracle documentation at the "
+                f"reference link and determine whether it affects any active {service} "
+                f"integrations, scheduled processes, or user-facing features. "
+                f"Update the impact level in the monitor once reviewed.\n"
             )
 
         sections.append(
             f"### {i}. {title}\n"
             f"**{category} — {service}** | Impact: {u.get('impact_level') or 'Unknown'}\n\n"
-            f"{body}"
+            f"{action_body}\n"
+            f"---\n\n"
+            f"{ai_suggestion}"
         )
 
     header = (
         "## Impact Analysis & Upgrade Guide\n\n"
         "> *Rule-based analysis — content-specific per update. "
-        "Configure an LLM provider in `.env` for AI-generated code-level guidance.*\n\n"
+        "Configure an LLM provider in `.env` for AI-generated, code-level guidance "
+        "with richer AI Suggestions and Jira Ticket Responses.*\n\n"
         "---\n\n"
     )
     jira_section = ""
@@ -306,7 +384,11 @@ def _rule_based_analyze(updates: list[dict], jira_issues: list[dict] | None = No
         )
 
     footer = f"\n\n---\n\n{llm_note}" if llm_note.strip() else ""
-    return header + "\n\n---\n\n".join(sections) + jira_section + footer
+    integration_marker = (
+        "INTEGRATION_IMPACT: YES\n" if _is_integration_related(updates)
+        else "INTEGRATION_IMPACT: NO\n"
+    )
+    return integration_marker + header + "\n\n---\n\n".join(sections) + jira_section + footer
 
 
 def analyze_impact(updates: list[dict], jira_issues: list[dict] | None = None) -> str:

@@ -319,6 +319,48 @@ def list_updates(
         return [r.to_dict() for r in rows]
 
 
+def multi_keyword_search(keywords: list[str], limit: int = 100) -> list[dict]:
+    """
+    Search across title + summary + content for ANY of the given keywords (OR logic).
+    Results are ranked by how many keywords matched (descending), then by date.
+    """
+    if not keywords:
+        return []
+
+    with session_scope() as s:
+        # Collect all matching rows and count hits per row
+        seen: dict[int, dict] = {}       # id → record dict
+        hits: dict[int, int]  = {}       # id → keyword hit count
+
+        for kw in keywords:
+            like = f"%{kw}%"
+            rows = (
+                s.query(OracleUpdate)
+                 .filter(or_(
+                     OracleUpdate.title.ilike(like),
+                     OracleUpdate.summary.ilike(like),
+                     OracleUpdate.content.ilike(like),
+                 ))
+                 .all()
+            )
+            for row in rows:
+                if row.id not in seen:
+                    seen[row.id] = row.to_dict()
+                    hits[row.id] = 0
+                hits[row.id] += 1
+
+    # Sort by hit count descending, then by release_date descending.
+    # reverse=True works on both because ISO date strings sort lexicographically
+    # ("2026-04-01" > "2025-01-01"), and higher hit counts should come first.
+    # Rows with no date get "0000-00-00" so they sort last when reversed.
+    ranked = sorted(
+        seen.values(),
+        key=lambda r: (hits[r["id"]], r.get("release_date") or "0000-00-00"),
+        reverse=True,
+    )
+    return ranked[:limit]
+
+
 def get_distinct_services() -> list[str]:
     with session_scope() as s:
         rows = s.query(OracleUpdate.service).distinct().all()
