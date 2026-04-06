@@ -171,8 +171,19 @@ input[type=checkbox]{accent-color:var(--accent2);width:15px;height:15px}
 .ssec{margin-bottom:22px}
 .ssec h3{color:var(--accent);font-size:0.87rem;letter-spacing:.5px;text-transform:uppercase;
   margin-bottom:9px;padding-bottom:6px;border-bottom:1px solid var(--bg-light)}
-.srow{display:flex;justify-content:space-between;padding:7px 0;font-size:0.93rem;border-bottom:1px solid var(--border-row)}
+.srow{display:flex;justify-content:space-between;align-items:center;padding:7px 0;
+  font-size:0.93rem;border-bottom:1px solid var(--border-row);flex-wrap:wrap;gap:4px}
 .sval{font-weight:700;color:var(--text)}
+.sval-click{cursor:pointer;display:inline-flex;align-items:center;gap:4px;
+  padding:2px 7px;border-radius:4px;border:1px solid transparent;transition:background .12s,border-color .12s}
+.sval-click:hover{background:var(--bg-light);border-color:#3a3f6a}
+.sval-click .sval{text-decoration:underline dotted}
+.drill-arrow{font-size:0.72rem;color:var(--text-dim);transition:transform .15s}
+.stat-drill{display:none;width:100%;margin-top:6px;padding:4px 0 2px;
+  border-top:1px solid var(--bg-light);max-height:220px;overflow-y:auto}
+.stat-drill-item{display:block;padding:5px 10px;font-size:0.86rem;color:var(--accent2);
+  text-decoration:none;border-radius:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat-drill-item:hover{background:var(--bg-light);text-decoration:underline}
 
 /* Status bar */
 #statusbar{background:var(--bg-mid);padding:5px 16px;font-size:0.87rem;color:var(--text-dim);
@@ -1021,36 +1032,99 @@ function renderTable(items){
   });
 }
 
+/* ── Stats helpers ─────────────────────────────────────── */
+function goToItem(id){
+  const item=ALL.find(u=>u.id===id);
+  if(item) showDetail(item);
+}
+function toggleDrill(id, btn){
+  const el=document.getElementById(id);
+  if(!el) return;
+  const willOpen=el.style.display!=='block';
+  // Close all open drills first
+  document.querySelectorAll('.stat-drill').forEach(d=>d.style.display='none');
+  document.querySelectorAll('.drill-arrow').forEach(a=>a.textContent='▸');
+  if(willOpen){
+    el.style.display='block';
+    const arrow=btn&&btn.querySelector('.drill-arrow');
+    if(arrow) arrow.textContent='▾';
+  }
+}
+
 /* ── Stats view ────────────────────────────────────────── */
 function computeStatsFromItems(items){
-  const s={total:items.length,new:items.filter(u=>u.is_new).length,
-           by_category:{},by_service:{},by_impact:{},by_version:{},last_run:_lastCrawlRun};
+  const s={
+    total:items.length, new:items.filter(u=>u.is_new).length,
+    allItems:items, newItems:items.filter(u=>u.is_new),
+    by_category:{},  items_by_category:{},
+    by_service:{},   items_by_service:{},
+    by_impact:{},    items_by_impact:{},
+    by_version:{},   items_by_version:{},
+    last_run:_lastCrawlRun
+  };
   items.forEach(u=>{
-    if(u.category)  s.by_category[u.category]=(s.by_category[u.category]||0)+1;
-    if(u.service)   s.by_service[u.service]=(s.by_service[u.service]||0)+1;
-    if(u.impact_level) s.by_impact[u.impact_level]=(s.by_impact[u.impact_level]||0)+1;
+    if(u.category){
+      s.by_category[u.category]=(s.by_category[u.category]||0)+1;
+      (s.items_by_category[u.category]||(s.items_by_category[u.category]=[])).push(u);
+    }
+    if(u.service){
+      s.by_service[u.service]=(s.by_service[u.service]||0)+1;
+      (s.items_by_service[u.service]||(s.items_by_service[u.service]=[])).push(u);
+    }
+    if(u.impact_level){
+      s.by_impact[u.impact_level]=(s.by_impact[u.impact_level]||0)+1;
+      (s.items_by_impact[u.impact_level]||(s.items_by_impact[u.impact_level]=[])).push(u);
+    }
     const rc=u.release_code||'— No version';
     s.by_version[rc]=(s.by_version[rc]||0)+1;
+    (s.items_by_version[rc]||(s.items_by_version[rc]=[])).push(u);
   });
   return s;
 }
 function renderStats(s){
-  const row=(l,v,c='')=>
-    `<div class="srow"><span>${l}</span><span class="sval"${c?` style="color:${c}"`:''}>${v}</span></div>`;
+  const esc=t=>(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  let dc=0;
+  // Build an inline drill-down list of item links
+  const drillList=items=>items.map(u=>
+    `<a class="stat-drill-item" href="#" onclick="goToItem(${u.id});return false;">${esc(u.title)}</a>`
+  ).join('');
+  // Row with optional clickable count + expandable list
+  const row=(l,v,c='',items=[])=>{
+    const valSpan=`<span class="sval"${c?` style="color:${c}"`:''}>${v}</span>`;
+    if(!items||!items.length)
+      return `<div class="srow"><span>${l}</span>${valSpan}</div>`;
+    const id='dr'+(dc++);
+    return `<div class="srow">`+
+      `<span>${l}</span>`+
+      `<span class="sval-click" onclick="toggleDrill('${id}',this)" title="Click to view ${v} item(s)">`+
+        `${valSpan}<span class="drill-arrow">▸</span>`+
+      `</span>`+
+      `<div class="stat-drill" id="${id}">${drillList(items)}</div>`+
+      `</div>`;
+  };
   let h='';
-  h+=`<div class="ssec"><h3>Overview</h3>`+row('Total Updates',s.total||0)+
-     row('New (unread)',s.new||0,'var(--accent2)')+`</div>`;
+  h+=`<div class="ssec"><h3>Overview</h3>`+
+     row('Total Updates',s.total||0,'',s.allItems||[])+
+     row('New (unread)',s.new||0,'var(--accent2)',s.newItems||[])+`</div>`;
   const ver=$('f-ver').value;
   if(ver)h+=`<div class="ssec"><h3 style="color:#90caf9">Filtered: Version ${ver}</h3></div>`;
   if(s.by_version&&!ver){h+=`<div class="ssec"><h3>By Version</h3>`;
-    Object.entries(s.by_version).sort((a,b)=>b[0].localeCompare(a[0])).forEach(([k,v])=>h+=row(k,v,'#90caf9'));h+=`</div>`;}
+    Object.entries(s.by_version).sort((a,b)=>b[0].localeCompare(a[0]))
+      .forEach(([k,v])=>h+=row(k,v,'#90caf9',(s.items_by_version||{})[k]||[]));
+    h+=`</div>`;}
   if(s.by_category){h+=`<div class="ssec"><h3>By Category</h3>`;
-    Object.entries(s.by_category).forEach(([k,v])=>h+=row(`${CI[k]||''} ${k}`,v));h+=`</div>`;}
+    Object.entries(s.by_category)
+      .forEach(([k,v])=>h+=row(`${CI[k]||''} ${k}`,v,'',(s.items_by_category||{})[k]||[]));
+    h+=`</div>`;}
   if(s.by_service){h+=`<div class="ssec"><h3>By Service</h3>`;
-    Object.entries(s.by_service).sort().forEach(([k,v])=>h+=row(`${SI[k]||''} ${k}`,v));h+=`</div>`;}
+    Object.entries(s.by_service).sort()
+      .forEach(([k,v])=>h+=row(`${SI[k]||''} ${k}`,v,'',(s.items_by_service||{})[k]||[]));
+    h+=`</div>`;}
   if(s.by_impact){const IC2={High:'var(--red)',Medium:'var(--orange)',Low:'var(--green)'};
     h+=`<div class="ssec"><h3>By Impact Level</h3>`;
-    Object.entries(s.by_impact).forEach(([k,v])=>h+=row(k||'Unknown',v,IC2[k]||''));h+=`</div>`;}
+    Object.entries(s.by_impact)
+      .forEach(([k,v])=>h+=row(k||'Unknown',v,IC2[k]||'',(s.items_by_impact||{})[k]||[]));
+    h+=`</div>`;}
   if(s.last_run){const r=s.last_run;
     h+=`<div class="ssec"><h3>Last Crawl Run</h3>`+row('Status',r.status||'—')+
        row('Sources tried',r.sources_tried||0)+row('Updates found',r.updates_found||0)+
