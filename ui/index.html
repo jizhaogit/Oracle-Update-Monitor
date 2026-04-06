@@ -288,6 +288,10 @@ input[type=color]{width:32px;height:32px;border:1px solid #3a3f6a;border-radius:
     <option value="">All</option>
     <option value="High">High</option><option value="Medium">Medium</option><option value="Low">Low</option>
   </select>
+  <label style="color:var(--text-dim)">Version</label>
+  <select id="f-ver" onchange="applyFilters()">
+    <option value="">All Versions</option>
+  </select>
   <label style="color:var(--text-dim)">Review</label>
   <select id="f-flag" onchange="applyFilters()">
     <option value="">All</option>
@@ -480,6 +484,7 @@ let _currentFlagId=null; // ID of the item currently shown in detail view
 let _aiSearchResults=null;   // null = not in AI mode; array = AI search results
 let _aiSearchKeywords=[];    // AI-expanded keywords (secondary highlight)
 let _aiSearchQuery='';       // raw user query (primary highlight)
+let _lastCrawlRun=null;      // cached last crawl run info for stats display
 
 const $=id=>document.getElementById(id);
 const setStatus=(l,r='')=>{$('s-left').textContent='  '+l;if(r)$('s-right').textContent=r};
@@ -503,7 +508,16 @@ async function loadAll(){
       if(!db) return 1;
       return db.localeCompare(da);
     });
-    renderTree(ALL);renderTable(ALL);renderStats(stats);
+    _lastCrawlRun=stats.last_run;
+    // Populate version dropdown (newest first, e.g. 26B > 26A > 25D)
+    const sel=$('f-ver');
+    const prevVer=sel.value;
+    const codes=[...new Set(ALL.map(u=>u.release_code).filter(Boolean))];
+    codes.sort((a,b)=>b.localeCompare(a));
+    sel.innerHTML='<option value="">All Versions</option>';
+    codes.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;sel.appendChild(o);});
+    if(prevVer&&codes.includes(prevVer))sel.value=prevVer;
+    renderTree(ALL);renderTable(ALL);renderStats(computeStatsFromItems(ALL));
     const nw=ALL.filter(u=>u.is_new).length;
     $('sidebar-meta').textContent=`${ALL.length}${nw?' · ✦'+nw:''}`;
     setStatus(`${ALL.length} updates`,nw?`✦ ${nw} new`:'');
@@ -512,18 +526,20 @@ async function loadAll(){
 
 /* ── Filters ───────────────────────────────────────────── */
 function getFiltered(){
-  const cat=$('f-cat').value, imp=$('f-imp').value, flg=$('f-flag').value;
+  const cat=$('f-cat').value, imp=$('f-imp').value, flg=$('f-flag').value, ver=$('f-ver').value;
   const base=_aiSearchResults!==null?_aiSearchResults:ALL;
   return base.filter(u=>{
     if(cat&&u.category!==cat)return false;
     if(imp&&u.impact_level!==imp)return false;
     if(flg==='flagged'&&!u.is_flagged)return false;
+    if(ver&&u.release_code!==ver)return false;
     return true;
   });
 }
 function applyFilters(){
   if(_aiSearchResults!==null){renderTree(_aiSearchResults);renderTable(_aiSearchResults);}
   else{const f=getFiltered();renderTree(f);renderTable(f);}
+  if($('pane-stats').classList.contains('on'))renderStats(computeStatsFromItems(getFiltered()));
 }
 function filterTree(){
   if(_aiSearchResults!==null) return; // AI mode: don't override with keyword filter
@@ -1006,12 +1022,28 @@ function renderTable(items){
 }
 
 /* ── Stats view ────────────────────────────────────────── */
+function computeStatsFromItems(items){
+  const s={total:items.length,new:items.filter(u=>u.is_new).length,
+           by_category:{},by_service:{},by_impact:{},by_version:{},last_run:_lastCrawlRun};
+  items.forEach(u=>{
+    if(u.category)  s.by_category[u.category]=(s.by_category[u.category]||0)+1;
+    if(u.service)   s.by_service[u.service]=(s.by_service[u.service]||0)+1;
+    if(u.impact_level) s.by_impact[u.impact_level]=(s.by_impact[u.impact_level]||0)+1;
+    const rc=u.release_code||'— No version';
+    s.by_version[rc]=(s.by_version[rc]||0)+1;
+  });
+  return s;
+}
 function renderStats(s){
   const row=(l,v,c='')=>
     `<div class="srow"><span>${l}</span><span class="sval"${c?` style="color:${c}"`:''}>${v}</span></div>`;
   let h='';
   h+=`<div class="ssec"><h3>Overview</h3>`+row('Total Updates',s.total||0)+
      row('New (unread)',s.new||0,'var(--accent2)')+`</div>`;
+  const ver=$('f-ver').value;
+  if(ver)h+=`<div class="ssec"><h3 style="color:#90caf9">Filtered: Version ${ver}</h3></div>`;
+  if(s.by_version&&!ver){h+=`<div class="ssec"><h3>By Version</h3>`;
+    Object.entries(s.by_version).sort((a,b)=>b[0].localeCompare(a[0])).forEach(([k,v])=>h+=row(k,v,'#90caf9'));h+=`</div>`;}
   if(s.by_category){h+=`<div class="ssec"><h3>By Category</h3>`;
     Object.entries(s.by_category).forEach(([k,v])=>h+=row(`${CI[k]||''} ${k}`,v));h+=`</div>`;}
   if(s.by_service){h+=`<div class="ssec"><h3>By Service</h3>`;
@@ -1031,7 +1063,7 @@ function openTab(name){
   const names=['detail','list','stats'];
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('on',names[i]===name));
   names.forEach(n=>$('pane-'+n).classList.toggle('on',n===name));
-  if(name==='stats')api('/stats').then(renderStats).catch(()=>{});
+  if(name==='stats')renderStats(computeStatsFromItems(getFiltered()));
 }
 
 /* ── Actions ───────────────────────────────────────────── */
