@@ -142,6 +142,12 @@ label{font-size:0.87rem;color:var(--text-dim)}
   white-space:pre-wrap;word-wrap:break-word;max-height:280px;overflow-y:auto}
 mark.kw{background:#7b4f00;color:#ffe082;border-radius:2px;padding:0 2px;font-style:normal;font-weight:700}
 mark.kw-ai{background:#1a3a5c;color:#90caf9;border-radius:2px;padding:0 2px;font-style:normal}
+/* Auto-enabled badge in sidebar */
+.t-auto-icon{font-size:0.82rem;flex-shrink:0;background:#1b3a1b;color:#69f0ae;
+  border:1px solid #2e7d32;border-radius:3px;padding:1px 6px;font-weight:700;
+  cursor:default;letter-spacing:0.5px}
+/* Orange radio circle for auto-enabled items */
+.t-item.auto-on input[type=radio]{accent-color:#ff9800}
 #d-features{display:flex;flex-direction:column;gap:4px;max-height:320px;overflow-y:auto}
 .feat-row{display:flex;align-items:flex-start;gap:10px;padding:7px 12px;border-radius:4px;
   background:var(--bg-mid);cursor:pointer;transition:background .12s}
@@ -710,7 +716,8 @@ function renderTree(items){
       : item.title;
 
     const cls='t-item'+(item.is_new?' isnew':'')+
-      (imp==='High'?' hi':imp==='Medium'?' me':imp==='Low'?' lo':'');
+      (imp==='High'?' hi':imp==='Medium'?' me':imp==='Low'?' lo':'')+
+      (isAutoEnabled(item)?' auto-on':'');
     const row=el('div',cls);
     row.dataset.id=item.id;
 
@@ -727,8 +734,11 @@ function renderTree(items){
     const uiIcon=isUi?el('span','t-ui-icon','🖥'):null;
     const flagIcon=item.is_flagged?el('span','t-flag-icon','🚩'):null;
     const cmtIcon=item.user_comment?el('span','t-flag-icon','💬'):null;
+    const autoEl=isAutoEnabled(item)?el('span','t-auto-icon','AUTO'):null;
+    if(autoEl) autoEl.title='Auto-enabled: Oracle pushed this directly — no action needed to enable it';
 
     row.appendChild(rb);row.appendChild(tog);row.appendChild(lbl);
+    if(autoEl)row.appendChild(autoEl);
     if(uiIcon)row.appendChild(uiIcon);
     if(flagIcon)row.appendChild(flagIcon);
     if(cmtIcon)row.appendChild(cmtIcon);
@@ -858,6 +868,24 @@ function renderTree(items){
   }
 }
 
+/* ── Auto-enabled detection ────────────────────────────── */
+// Returns true when Oracle's text says no action is needed to enable the feature
+// i.e. it was pushed/implemented automatically for all tenants.
+const _AUTO_PHRASES=[
+  "don't need to do anything to enable",
+  "do not need to do anything to enable",
+  "no action needed to enable",
+  "automatically enabled",
+  "enabled by default",
+  "enabled automatically",
+  "no steps required to enable",
+  "nothing to enable",
+];
+function isAutoEnabled(item){
+  const hay=((item.summary||'')+(item.content||'')).toLowerCase();
+  return _AUTO_PHRASES.some(p=>hay.includes(p));
+}
+
 /* ── Keyword highlighter ───────────────────────────────── */
 function highlightText(text, primaryKws, secondaryKws){
   // Safely escape HTML first
@@ -917,6 +945,7 @@ function showDetail(item){
     (item.is_flagged?`<span class="badge b-flag">🚩 Flagged for Review</span>`:'')+
     (item.user_comment?`<span class="badge" style="background:#1b4332;color:#a5d6a7">💬 Has Notes</span>`:'')+
     (item.is_new?`<span class="badge b-new">NEW</span>`:'')+
+    (isAutoEnabled(item)?`<span class="badge" style="background:#1b3a1b;color:#69f0ae;border:1px solid #2e7d32" title="Oracle pushed this directly — no action needed to enable it">⚡ Auto-Enabled</span>`:'')+
     (verCount>1?`<span class="badge b-ver" onclick="openConclusionSingle(${item.id})" title="View version history">v${verCount} — Compare Versions</span>`:'');
   if(_aiSearchResults!==null&&_aiSearchQuery){
     // Primary = raw user query words (what they actually typed) — always highlighted amber
