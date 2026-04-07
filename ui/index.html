@@ -196,9 +196,36 @@ input[type=checkbox]{accent-color:var(--accent2);width:15px;height:15px}
   display:flex;justify-content:space-between;flex-shrink:0;border-top:1px solid var(--bg-light)}
 
 /* ════════════════════════════════════════════════════════
-   CONCLUSION MODAL
+   ITEM QUICK-VIEW POPUP (stats drill-down)
    ════════════════════════════════════════════════════════ */
-#modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;
+#item-popup-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);
+  z-index:1100;align-items:center;justify-content:center}
+#item-popup-overlay.open{display:flex}
+#item-popup{background:var(--bg-mid);border:1px solid var(--bg-light);border-radius:8px;
+  width:80vw;max-width:900px;max-height:82vh;display:flex;flex-direction:column;
+  box-shadow:0 20px 60px rgba(0,0,0,.6)}
+#ip-header{padding:13px 18px;border-bottom:1px solid var(--bg-light);
+  display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0;gap:12px}
+#ip-title{font-size:1rem;font-weight:700;color:var(--text);line-height:1.4;flex:1}
+#ip-close{background:var(--bg-light);border:none;color:var(--text);
+  font-size:1.1rem;width:28px;height:28px;border-radius:4px;cursor:pointer;flex-shrink:0}
+#ip-close:hover{background:var(--accent);color:#fff}
+#ip-badges{padding:8px 18px;border-bottom:1px solid var(--bg-light);
+  display:flex;flex-wrap:wrap;gap:6px;flex-shrink:0}
+#ip-body{flex:1;overflow-y:auto;padding:14px 18px 18px;display:flex;flex-direction:column;gap:10px}
+#ip-body .slbl{font-size:0.78rem;color:var(--text-dim);letter-spacing:1px;
+  text-transform:uppercase;margin:6px 0 4px}
+#ip-summary{background:var(--bg-dark);padding:10px 14px;border-radius:4px;
+  font-size:0.93rem;line-height:1.7}
+#ip-content{background:var(--bg-dark);padding:10px 14px;border-radius:4px;
+  font-size:0.87rem;line-height:1.75;white-space:pre-wrap;word-wrap:break-word;
+  max-height:200px;overflow-y:auto}
+#ip-footer{padding:10px 18px;border-top:1px solid var(--bg-light);flex-shrink:0;
+  display:flex;align-items:center;gap:10px;background:var(--bg-card)}
+
+/*  CONCLUSION MODAL
+   ════════════════════════════════════════════════════════ */
+#modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1200;
   align-items:center;justify-content:center}
 #modal-overlay.open{display:flex}
 #modal{background:var(--bg-mid);border:1px solid var(--bg-light);border-radius:8px;
@@ -452,7 +479,29 @@ input[type=color]{width:32px;height:32px;border:1px solid #3a3f6a;border-radius:
 </div>
 
 <!-- ════════════════════════════════════════════════════════
-     CONCLUSION MODAL
+     ITEM QUICK-VIEW POPUP
+     ════════════════════════════════════════════════════════ -->
+<div id="item-popup-overlay" onclick="closeItemPopupOnBg(event)">
+  <div id="item-popup">
+    <div id="ip-header">
+      <div id="ip-title"></div>
+      <button id="ip-close" onclick="closeItemPopup()">✕</button>
+    </div>
+    <div id="ip-badges"></div>
+    <div id="ip-body">
+      <div class="slbl">Summary</div>
+      <div id="ip-summary"></div>
+      <div class="slbl">Full Content</div>
+      <div id="ip-content"></div>
+    </div>
+    <div id="ip-footer">
+      <button class="btn btn-conclude" onclick="itemPopupConclusion()">🔍 Conclusion &amp; Analyze</button>
+      <a id="ip-link" href="#" target="_blank" class="btn btn-sec" style="text-decoration:none">🔗 View Source</a>
+    </div>
+  </div>
+</div>
+
+<!--  CONCLUSION MODAL
      ════════════════════════════════════════════════════════ -->
 <div id="modal-overlay" onclick="closeModalOnBg(event)">
   <div id="modal">
@@ -1062,9 +1111,56 @@ function renderTable(items){
 }
 
 /* ── Stats helpers ─────────────────────────────────────── */
+let _itemPopupId=null;  // ID of the item currently shown in the quick-view popup
+
 function goToItem(id){
   const item=ALL.find(u=>u.id===id);
-  if(item) showDetail(item);
+  if(!item) return;
+  _itemPopupId=id;
+
+  // Header
+  $('ip-title').textContent=item.title;
+
+  // Badges — reuse same logic as the main detail view
+  const dt=item.release_date?
+    new Date(item.release_date).toLocaleDateString('en-US',{year:'numeric',month:'short'}):'—';
+  const imp=item.impact_level||'';
+  const rc=item.release_code||'';
+  const IC2={High:'var(--red)',Medium:'var(--orange)',Low:'var(--green)'};
+  $('ip-badges').innerHTML=
+    `<span class="badge b-cat${item.category==='OIC'?'-oic':''}">${CI[item.category]||''} ${item.category||''}</span>`+
+    `<span class="badge b-svc">${SI[item.service]||''} ${item.service||''}</span>`+
+    (imp?`<span class="badge" style="background:${IC2[imp]||'#555'};color:#fff">${imp} Impact</span>`:'')+
+    `<span class="badge b-date">📅 ${dt}</span>`+
+    (rc?`<span class="badge b-code">🏷 ${rc}</span>`:'')+
+    (item.is_new?`<span class="badge b-new">NEW</span>`:'')+
+    (isAutoEnabled(item)?`<span class="badge" style="background:#1b3a1b;color:#69f0ae;border:1px solid #2e7d32">⚡ Auto-Enabled</span>`:'')+
+    (item.is_flagged?`<span class="badge b-flag">🚩 Flagged</span>`:'')+
+    ((item.tags||[]).includes('Redwood UI')?`<span class="badge b-ui">🖥 UI</span>`:'');
+
+  // Body
+  $('ip-summary').textContent=item.summary||'No summary available.';
+  $('ip-content').textContent=item.content||'No content available.';
+
+  // Footer link
+  const lnk=$('ip-link');
+  lnk.href=item.source_url||'#';
+  lnk.style.display=item.source_url?'':'none';
+
+  $('item-popup-overlay').classList.add('open');
+}
+
+function closeItemPopup(){
+  $('item-popup-overlay').classList.remove('open');
+  _itemPopupId=null;
+}
+function closeItemPopupOnBg(e){
+  if(e.target===$('item-popup-overlay')) closeItemPopup();
+}
+function itemPopupConclusion(){
+  if(_itemPopupId==null) return;
+  openConclusionSingle(_itemPopupId);
+  // Popup stays open underneath; closing the conclusion modal returns to it
 }
 function toggleDrill(id, btn){
   const el=document.getElementById(id);
@@ -1082,9 +1178,12 @@ function toggleDrill(id, btn){
 
 /* ── Stats view ────────────────────────────────────────── */
 function computeStatsFromItems(items){
+  const autoItems=items.filter(isAutoEnabled);
   const s={
     total:items.length, new:items.filter(u=>u.is_new).length,
     allItems:items, newItems:items.filter(u=>u.is_new),
+    autoTotal:autoItems.length, autoItems,
+    auto_by_category:{}, auto_items_by_category:{},
     by_category:{},  items_by_category:{},
     by_service:{},   items_by_service:{},
     by_impact:{},    items_by_impact:{},
@@ -1107,6 +1206,13 @@ function computeStatsFromItems(items){
     const rc=u.release_code||'— No version';
     s.by_version[rc]=(s.by_version[rc]||0)+1;
     (s.items_by_version[rc]||(s.items_by_version[rc]=[])).push(u);
+  });
+  // Auto-enabled breakdown by category
+  autoItems.forEach(u=>{
+    if(u.category){
+      s.auto_by_category[u.category]=(s.auto_by_category[u.category]||0)+1;
+      (s.auto_items_by_category[u.category]||(s.auto_items_by_category[u.category]=[])).push(u);
+    }
   });
   return s;
 }
@@ -1134,7 +1240,21 @@ function renderStats(s){
   let h='';
   h+=`<div class="ssec"><h3>Overview</h3>`+
      row('Total Updates',s.total||0,'',s.allItems||[])+
-     row('New (unread)',s.new||0,'var(--accent2)',s.newItems||[])+`</div>`;
+     row('New (unread)',s.new||0,'var(--accent2)',s.newItems||[])+
+     row('⚡ Auto-Enabled',s.autoTotal||0,'#69f0ae',s.autoItems||[])+`</div>`;
+
+  if(s.autoTotal){
+    h+=`<div class="ssec">`+
+       `<h3 style="color:#69f0ae">⚡ Auto-Enabled Features</h3>`+
+       `<div class="srow" style="font-size:0.8rem;color:var(--text-dim);margin-bottom:8px">`+
+         `Oracle pushed these directly — no action needed to enable them, `+
+         `but they may affect your users or integrations.</div>`;
+    Object.entries(s.auto_by_category)
+      .sort((a,b)=>b[1]-a[1])
+      .forEach(([k,v])=>h+=row(`${CI[k]||''} ${k}`,v,'#69f0ae',(s.auto_items_by_category||{})[k]||[]));
+    h+=`</div>`;
+  }
+
   const ver=$('f-ver').value;
   if(ver)h+=`<div class="ssec"><h3 style="color:#90caf9">Filtered: Version ${ver}</h3></div>`;
   if(s.by_version&&!ver){h+=`<div class="ssec"><h3>By Version</h3>`;
