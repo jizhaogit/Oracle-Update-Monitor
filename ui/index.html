@@ -1409,7 +1409,7 @@ function renderStats(s){
       .forEach(([k,v])=>h+=row(k||'Unknown',v,IC2[k]||'',(s.items_by_impact||{})[k]||[]));
     h+=`</div>`;}
   if(s.last_run){const r=s.last_run;
-    const dt=r.started_at?new Date(r.started_at).toLocaleString():'—';
+    const _d=r.started_at?new Date(r.started_at):null;const dt=_d?_d.getFullYear()+' '+_d.toLocaleString('en',{month:'long'})+' '+String(_d.getDate()).padStart(2,'0'):'—';
     h+=`<div class="ssec"><h3>Last Crawl Run</h3>`+row('Date',dt)+row('Status',r.status||'—')+
        row('Sources tried',r.sources_tried||0)+row('Updates found',r.updates_found||0)+
        row('New updates',r.updates_new||0)+`</div>`;}
