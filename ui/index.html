@@ -601,6 +601,9 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
 
     <!-- Stats Tab -->
     <div class="pane" id="pane-stats">
+      <div style="display:flex;justify-content:flex-end;padding:0 0 12px 0">
+        <button onclick="exportStatsCSV()" style="background:var(--telus-purple);color:#fff;border:none;border-radius:5px;padding:7px 16px;font-size:0.82rem;cursor:pointer;font-weight:600;letter-spacing:.3px">⬇ Export to CSV</button>
+      </div>
       <div id="stats-inner"></div>
     </div>
   </div>
@@ -1414,6 +1417,36 @@ function renderStats(s){
        row('Sources tried',r.sources_tried||0)+row('Updates found',r.updates_found||0)+
        row('New updates',r.updates_new||0)+`</div>`;}
   $('stats-inner').innerHTML=h;
+}
+
+/* ── Export Stats CSV ──────────────────────────────────── */
+function exportStatsCSV(){
+  const items=getFiltered();
+  const ver=$('f-ver').value;
+  const title=ver?`Oracle Update Report ${ver}`:'Oracle Update Report';
+  const cols=['Topic','Category','Version','Impact Level','Auto','Jira Link','Customize Note'];
+  const esc=v=>{
+    const s=String(v==null?'':v).replace(/"/g,'""');
+    return /[",\n\r]/.test(s)?`"${s}"`:s;
+  };
+  const rows=[esc(title),cols.map(esc).join(',')];
+  items.forEach(u=>{
+    rows.push([
+      u.title||'',
+      u.category||'',
+      u.release_code||'',
+      u.impact_level||'',
+      isAutoEnabled(u)?'Auto':'N/A',
+      u.flag_note||'',
+      u.user_comment||''
+    ].map(esc).join(','));
+  });
+  const blob=new Blob(['\uFEFF'+rows.join('\r\n')],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='oracle_updates_'+(new Date().toISOString().slice(0,10))+'.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 /* ── Tabs ──────────────────────────────────────────────── */
