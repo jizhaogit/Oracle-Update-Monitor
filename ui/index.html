@@ -451,8 +451,53 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
 ::-webkit-scrollbar-track{background:var(--telus-brandworld-white)}
 ::-webkit-scrollbar-thumb{background:var(--telus-cloud);border-radius:3px}
 ::-webkit-scrollbar-thumb:hover{background:var(--telus-shuttle)}
+
+/* ── Project Config Modal ── */
+#cfg-overlay{display:none;position:fixed;inset:0;background:rgba(44,46,48,.55);
+  z-index:1300;align-items:center;justify-content:center}
+#cfg-overlay.open{display:flex}
+#cfg-modal{background:var(--telus-white);border:1px solid var(--telus-mystic);
+  border-top:3px solid var(--telus-purple);border-radius:8px;
+  width:90vw;max-width:1100px;max-height:88vh;display:flex;flex-direction:column;
+  box-shadow:0 8px 32px rgba(44,46,48,.18)}
+#cfg-header{padding:13px 20px;border-bottom:1px solid var(--telus-mystic);
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
+  background:var(--telus-brandworld-white)}
+#cfg-header-title{font-size:1rem;font-weight:400;color:var(--telus-purple)}
+#cfg-close{background:var(--telus-mystic);border:none;color:var(--telus-charcoal);
+  font-size:1.2rem;width:30px;height:30px;border-radius:4px;cursor:pointer;line-height:1}
+#cfg-close:hover{background:var(--telus-crimson);color:#fff}
+#cfg-body{flex:1;overflow-y:auto;padding:20px 24px;display:flex;flex-direction:column;gap:16px}
+#cfg-drop{border:2px dashed var(--telus-mystic);border-radius:8px;padding:36px 24px;
+  text-align:center;cursor:pointer;transition:border-color .2s,background .2s;
+  background:var(--telus-brandworld-white)}
+#cfg-drop:hover,#cfg-drop.drag-over{border-color:var(--telus-purple);background:var(--telus-purple-light)}
+#cfg-drop-icon{font-size:2.2rem;margin-bottom:8px}
+#cfg-drop-label{font-size:0.93rem;color:var(--text-dim);margin-bottom:6px}
+#cfg-drop-hint{font-size:0.78rem;color:var(--telus-cloud)}
+#cfg-file-input{display:none}
+#cfg-filename{font-size:0.82rem;color:var(--telus-accessible-green);font-weight:600;margin-top:6px}
+#cfg-sheets{display:flex;flex-direction:column;gap:10px}
+.cfg-sheet-card{background:var(--telus-brandworld-white);border:1px solid var(--telus-mystic);
+  border-radius:6px;overflow:hidden}
+.cfg-sheet-header{padding:9px 14px;background:var(--telus-purple-light);
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  border-bottom:1px solid var(--telus-mystic)}
+.cfg-sheet-name{font-weight:700;color:var(--telus-purple);font-size:0.93rem}
+.cfg-sheet-meta{font-size:0.78rem;color:var(--text-dim)}
+.cfg-sheet-table-wrap{overflow-x:auto;max-height:220px;overflow-y:auto}
+.cfg-sheet-table{width:100%;border-collapse:collapse;font-size:0.8rem}
+.cfg-sheet-table th{background:var(--telus-brandworld-white);color:var(--telus-purple);
+  padding:6px 10px;text-align:left;position:sticky;top:0;font-size:0.75rem;
+  letter-spacing:.3px;border-bottom:2px solid var(--telus-purple);white-space:nowrap}
+.cfg-sheet-table td{padding:5px 10px;border-bottom:1px solid var(--telus-mystic);
+  white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis}
+.cfg-sheet-table tbody tr:hover td{background:var(--telus-alabaster)}
+.cfg-empty-sheet{padding:12px 14px;font-size:0.82rem;color:var(--text-dim);font-style:italic}
+#cfg-status{font-size:0.82rem;color:var(--text-dim);text-align:center}
 </style>
 </head>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <body>
 
 <!-- Toolbar -->
@@ -486,6 +531,7 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
   <button class="btn btn-conclude" id="btn-conclude" onclick="openConclusion()" disabled>
     🔍 Conclusion
   </button>
+  <button class="btn btn-sec" onclick="openProjectConfig()" title="Upload & preview project configuration Excel file">⚙ Project Config</button>
   <div class="vsep"></div>
   <select id="f-fontsize" onchange="applyFontSize(this.value)" title="Font Size">
     <option value="12">Small (12px)</option>
@@ -669,6 +715,29 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
         🔄 Regenerate
       </button>
       <span id="analysis-status"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Project Config Modal -->
+<div id="cfg-overlay" onclick="closeCfgOnBg(event)">
+  <div id="cfg-modal">
+    <div id="cfg-header">
+      <div id="cfg-header-title">⚙ Project Configuration — Excel Summary</div>
+      <button id="cfg-close" onclick="closeProjectConfig()">✕</button>
+    </div>
+    <div id="cfg-body">
+      <div id="cfg-drop" onclick="document.getElementById('cfg-file-input').click()"
+           ondragover="cfgDragOver(event)" ondragleave="cfgDragLeave(event)" ondrop="cfgDrop(event)">
+        <div id="cfg-drop-icon">📂</div>
+        <div id="cfg-drop-label">Click to browse or drag &amp; drop your Excel file here</div>
+        <div id="cfg-drop-hint">Supports .xlsx, .xls, .xlsm, .csv</div>
+        <div id="cfg-filename"></div>
+      </div>
+      <input type="file" id="cfg-file-input" accept=".xlsx,.xls,.xlsm,.csv"
+             onchange="cfgFileSelected(this.files[0])">
+      <div id="cfg-status"></div>
+      <div id="cfg-sheets"></div>
     </div>
   </div>
 </div>
@@ -2083,6 +2152,104 @@ function loadPreferences(){
 /* ── Boot ──────────────────────────────────────────────── */
 loadPreferences();
 loadAll();
+
+/* ── Project Config ──────────────────────────────────── */
+function openProjectConfig(){
+  $('cfg-overlay').classList.add('open');
+}
+function closeProjectConfig(){
+  $('cfg-overlay').classList.remove('open');
+}
+function closeCfgOnBg(e){
+  if(e.target===$('cfg-overlay')) closeProjectConfig();
+}
+function cfgDragOver(e){
+  e.preventDefault();
+  $('cfg-drop').classList.add('drag-over');
+}
+function cfgDragLeave(){
+  $('cfg-drop').classList.remove('drag-over');
+}
+function cfgDrop(e){
+  e.preventDefault();
+  $('cfg-drop').classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if(file) cfgFileSelected(file);
+}
+function cfgFileSelected(file){
+  if(!file) return;
+  const allowed = /\.(xlsx|xls|xlsm|csv)$/i;
+  if(!allowed.test(file.name)){
+    $('cfg-status').textContent = '⚠ Please upload an Excel file (.xlsx, .xls, .xlsm) or .csv';
+    return;
+  }
+  $('cfg-filename').textContent = '📄 ' + file.name;
+  $('cfg-status').textContent = 'Parsing…';
+  $('cfg-sheets').innerHTML = '';
+  const reader = new FileReader();
+  reader.onload = function(ev){
+    try{
+      if(typeof XLSX === 'undefined'){
+        $('cfg-status').textContent = '⚠ SheetJS library not loaded. Please check your connection.';
+        return;
+      }
+      const data = new Uint8Array(ev.target.result);
+      const wb = XLSX.read(data, {type:'array', cellDates:true});
+      $('cfg-status').textContent = `✓ Found ${wb.SheetNames.length} sheet${wb.SheetNames.length!==1?'s':''} in "${file.name}"`;
+      renderCfgSheets(wb);
+    }catch(err){
+      $('cfg-status').textContent = '⚠ Error parsing file: ' + err.message;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+function renderCfgSheets(wb){
+  const container = $('cfg-sheets');
+  container.innerHTML = '';
+  wb.SheetNames.forEach(function(name, idx){
+    const ws = wb.Sheets[name];
+    const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:'', raw:false});
+    const dataRows = rows.filter(function(r){ return r.some(function(c){ return c!==''; }); });
+    const headers = dataRows[0] || [];
+    const previewRows = dataRows.slice(1, 6);
+    const card = document.createElement('div');
+    card.className = 'cfg-sheet-card';
+    const hdr = document.createElement('div');
+    hdr.className = 'cfg-sheet-header';
+    hdr.innerHTML = `<span class="cfg-sheet-name">📋 ${esc(name)}</span>`
+      + `<span class="cfg-sheet-meta">${dataRows.length>0?dataRows.length-1:0} data row${dataRows.length!==2?'s':''} &nbsp;·&nbsp; ${headers.length} column${headers.length!==1?'s':''}</span>`;
+    card.appendChild(hdr);
+    if(headers.length===0){
+      const empty = document.createElement('div');
+      empty.className = 'cfg-empty-sheet';
+      empty.textContent = 'Sheet is empty.';
+      card.appendChild(empty);
+    } else {
+      const wrap = document.createElement('div');
+      wrap.className = 'cfg-sheet-table-wrap';
+      let tbl = '<table class="cfg-sheet-table"><thead><tr>';
+      tbl += '<th style="color:var(--text-dim);font-weight:400">#</th>';
+      headers.forEach(function(h){ tbl += `<th>${esc(String(h))}</th>`; });
+      tbl += '</tr></thead><tbody>';
+      if(previewRows.length===0){
+        tbl += `<tr><td colspan="${headers.length+1}" style="font-style:italic;color:var(--text-dim)">No data rows</td></tr>`;
+      } else {
+        previewRows.forEach(function(row, ri){
+          tbl += `<tr><td style="color:var(--text-dim);font-size:0.75rem">${ri+1}</td>`;
+          headers.forEach(function(_,ci){ tbl += `<td title="${esc(String(row[ci]||''))}">${esc(String(row[ci]||''))}</td>`; });
+          tbl += '</tr>';
+        });
+        if(dataRows.length-1 > 5){
+          tbl += `<tr><td colspan="${headers.length+1}" style="font-style:italic;color:var(--text-dim);font-size:0.75rem;padding:6px 10px">… ${dataRows.length-1-5} more row${dataRows.length-1-5!==1?'s':''} not shown</td></tr>`;
+        }
+      }
+      tbl += '</tbody></table>';
+      wrap.innerHTML = tbl;
+      card.appendChild(wrap);
+    }
+    container.appendChild(card);
+  });
+}
 </script>
 </body>
 </html>
