@@ -16,7 +16,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from config import (
-    IMPACT_KEYWORDS, LLM_PROVIDER, TAG_KEYWORDS,
+    IMPACT_KEYWORDS, LLM_PROVIDER, TAG_KEYWORDS, DATA_DIR,
     OPENAI_API_KEY, OPENAI_MODEL,
     ANTHROPIC_API_KEY, ANTHROPIC_MODEL,
     BEDROCK_MODEL_ID, BEDROCK_REGION, BEDROCK_PROFILE,
@@ -25,6 +25,26 @@ from config import (
 )
 
 log = logging.getLogger(__name__)
+
+# Path where the user's project instructions are stored
+_PROJECT_CONTEXT_FILE = DATA_DIR / "project_context.txt"
+
+
+def _load_project_context() -> str:
+    """Return the saved project instructions, or empty string if none saved."""
+    try:
+        if _PROJECT_CONTEXT_FILE.exists():
+            text = _PROJECT_CONTEXT_FILE.read_text(encoding="utf-8").strip()
+            return text
+    except Exception as exc:
+        log.warning("Could not read project context: %s", exc)
+    return ""
+
+
+def save_project_context(text: str) -> None:
+    """Persist project instructions to disk."""
+    _PROJECT_CONTEXT_FILE.write_text(text.strip(), encoding="utf-8")
+    log.info("Project context saved (%d chars)", len(text.strip()))
 
 
 # ── Rule-based classifier (always available) ───────────────────────────────────
@@ -137,12 +157,13 @@ def _get_chain():
 
         template = ChatPromptTemplate.from_messages([
             ("system", (
-                "You are an expert Oracle Cloud Infrastructure (OCI) and Oracle Integration "
-                "Cloud (OIC) analyst. Analyse the following release-note entry and respond "
+                "You are an expert Oracle Cloud HCM and OIC analyst. "
+                "Analyse the following release-note entry and respond "
                 "with a JSON object containing exactly these fields:\n"
                 "  impact_level: one of High | Medium | Low\n"
                 "  tags: list of short keyword strings (max 6)\n"
-                "  summary: one-paragraph plain-English summary (max 80 words)\n"
+                "  summary: one-paragraph plain-English summary (max 80 words)\n\n"
+                "{project_context}"
                 "Respond with valid JSON only — no markdown, no extra text."
             )),
             ("human", (
@@ -174,13 +195,23 @@ def llm_classify(record: dict) -> dict:
 
     bucket: dict = {}
 
+    # Load project context and format it for the prompt
+    _ctx = _load_project_context()
+    _project_context_str = (
+        f"Team project context (use this to judge relevance and impact):\n"
+        f"─────────────────────────────────────────────\n"
+        f"{_ctx}\n"
+        f"─────────────────────────────────────────────\n\n"
+    ) if _ctx else ""
+
     def _invoke():
         try:
             raw = chain.invoke({
-                "title":    record.get("title", ""),
-                "service":  record.get("service", ""),
-                "category": record.get("category", ""),
-                "content":  record.get("content", "")[:1500],
+                "title":           record.get("title", ""),
+                "service":         record.get("service", ""),
+                "category":        record.get("category", ""),
+                "content":         record.get("content", "")[:1500],
+                "project_context": _project_context_str,
             })
             raw = re.sub(r"```json|```", "", raw).strip()
             bucket["parsed"] = json.loads(raw)
@@ -213,7 +244,7 @@ def classify(record: dict) -> dict:
     Main entry point: classify a record dict.
     Uses LLM if configured, otherwise rule-based.
     """
-    if LLM_PROVIDER in ("openai", "ollama"):
+    if LLM_PROVIDER in ("openai", "anthropic", "bedrock", "ollama"):
         return llm_classify(record)
     return rule_classify(record)
 

@@ -539,6 +539,31 @@ def list_crawl_runs(limit: int = 20) -> list[dict]:
     return [r.to_dict() for r in rows]
 
 
+def update_classification(update_id: int, impact_level: str,
+                          tags: list, summary: str) -> None:
+    """
+    Overwrite the LLM-derived classification fields on a record.
+    Unlike set_impact(), this does NOT set impact_overridden — it is used for
+    bulk re-classification triggered by the user via "Mark Impact", not for
+    manual per-record overrides.
+    Records where impact_overridden=True are intentionally skipped so that
+    the user's manual override survives a bulk re-run.
+    """
+    import json as _json
+    with session_scope() as s:
+        rec = s.query(OracleUpdate).filter(OracleUpdate.id == update_id).first()
+        if rec is None:
+            return
+        if rec.impact_overridden:
+            return          # honour manual override — never overwrite
+        if impact_level:
+            rec.impact_level = impact_level
+        if tags is not None:
+            rec._tags = _json.dumps(tags)
+        if summary:
+            rec.summary = summary
+
+
 def set_impact(update_id: int, impact_level: Optional[str]) -> Optional[dict]:
     """
     Manually override the impact level of an update record.

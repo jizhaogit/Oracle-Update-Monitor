@@ -36,19 +36,23 @@ from storage.database import (
     get_analysis_cache, save_analysis_cache,
     get_stats, get_update, get_updates_by_ids, get_versions,
     list_crawl_runs, list_updates, multi_keyword_search,
-    set_comment, set_flag, set_impact,
+    set_comment, set_flag, set_impact, update_classification,
     get_distinct_categories, get_distinct_services, mark_all_seen,
     delete_by_category, delete_legacy_records,
 )
 from processor.summarizer import ask as qa_ask
 from processor.analyzer import analyze_impact
 from processor.jira_client import fetch_jira_issues_from_notes
+from processor.classifier import _load_project_context, save_project_context
 
 log = logging.getLogger(__name__)
 
 # In-memory job store for async analyze requests
 # { job_id: {status, analysis, from_cache, generated_at, error} }
 _analyze_jobs: dict = {}
+
+# In-memory state for the background reclassify-all job
+_reclassify_status: dict = {"running": False, "done": 0, "total": 0, "error": None}
 
 app = FastAPI(
     title="Oracle OCI/OIC Monitor API",
@@ -205,6 +209,78 @@ def trigger_crawl():
 def mark_seen():
     n = mark_all_seen()
     return {"marked_seen": n}
+
+
+class ProjectContextRequest(BaseModel):
+    text: str = ""
+
+
+@app.get("/project-context")
+def get_project_context():
+    """Return the saved project instructions text."""
+    text = _load_project_context()
+    return {"text": text, "active": bool(text)}
+
+
+@app.post("/project-context")
+def set_project_context(body: ProjectContextRequest):
+    """Save project instructions. Pass empty string to clear."""
+    save_project_context(body.text)
+    text = body.text.strip()
+    return {"saved": True, "active": bool(text), "length": len(text)}
+
+
+@app.post("/reclassify-all")
+def reclassify_all_endpoint():
+    """
+    Start a background job that re-classifies every record in the database
+    using the current LLM provider and saved project instructions.
+    Records with impact_overridden=True are skipped (manual overrides survive).
+    Poll GET /reclassify-status for progress.
+    """
+    global _reclassify_status
+    if _reclassify_status.get("running"):
+        return {"status": "already_running",
+                "done": _reclassify_status["done"],
+                "total": _reclassify_status["total"]}
+
+    _reclassify_status = {"running": True, "done": 0, "total": 0, "error": None}
+
+    def _do():
+        try:
+            from processor.classifier import classify
+            records = list_updates(limit=10000)
+            _reclassify_status["total"] = len(records)
+            log.info("Reclassify-all: %d records to process", len(records))
+            for rec in records:
+                try:
+                    classified = classify(rec)
+                    update_classification(
+                        rec["id"],
+                        classified.get("impact_level", "Low"),
+                        classified.get("tags", []),
+                        classified.get("summary", ""),
+                    )
+                except Exception as exc:
+                    log.warning("Reclassify failed for id=%s: %s", rec.get("id"), exc)
+                finally:
+                    _reclassify_status["done"] += 1
+        except Exception as exc:
+            log.error("Reclassify-all fatal error: %s", exc)
+            _reclassify_status["error"] = str(exc)
+        finally:
+            _reclassify_status["running"] = False
+            log.info("Reclassify-all complete: %d records processed",
+                     _reclassify_status["done"])
+
+    threading.Thread(target=_do, name="reclassify-all", daemon=True).start()
+    return {"status": "started"}
+
+
+@app.get("/reclassify-status")
+def reclassify_status_endpoint():
+    """Return progress of the current (or last) reclassify-all job."""
+    return _reclassify_status
 
 
 @app.post("/purge-non-hcm")
