@@ -527,7 +527,7 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
     <option value="flagged">🚩 Flagged</option>
   </select>
   <div class="vsep"></div>
-  <button class="btn btn-sec" onclick="loadAll()">↺ Refresh</button>
+  <!-- Refresh button hidden — call loadAll() from browser console if needed -->
   <button class="btn btn-sec" onclick="markSeen()" title="Mark Seen">✓</button>
   <!-- Clean Legacy button hidden — call purgeNonHcm() from browser console if needed -->
   <button class="btn" onclick="triggerCrawl()">▶ Crawl Now</button>
