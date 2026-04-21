@@ -43,6 +43,7 @@ from storage.database import (
 from processor.summarizer import ask as qa_ask
 from processor.analyzer import analyze_impact
 from processor.jira_client import fetch_jira_issues_from_notes
+from processor.classifier import _load_project_context, save_project_context
 
 log = logging.getLogger(__name__)
 
@@ -205,6 +206,25 @@ def trigger_crawl():
 def mark_seen():
     n = mark_all_seen()
     return {"marked_seen": n}
+
+
+class ProjectContextRequest(BaseModel):
+    text: str = ""
+
+
+@app.get("/project-context")
+def get_project_context():
+    """Return the saved project instructions text."""
+    text = _load_project_context()
+    return {"text": text, "active": bool(text)}
+
+
+@app.post("/project-context")
+def set_project_context(body: ProjectContextRequest):
+    """Save project instructions. Pass empty string to clear."""
+    save_project_context(body.text)
+    text = body.text.strip()
+    return {"saved": True, "active": bool(text), "length": len(text)}
 
 
 @app.post("/purge-non-hcm")
