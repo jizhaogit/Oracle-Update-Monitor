@@ -758,14 +758,29 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
           Describe your project — modules in scope, key integrations, business focus.
           When an LLM is configured, the classifier uses this to judge impact relevance.
           Leave blank to use the default rule-based ranking.
+          Upload a <code>.txt</code> file <em>or</em> type below — not both.
         </div>
         <textarea id="pi-textarea"
           placeholder="Example: We are implementing Oracle HCM for a mid-size company. Our project scope includes Compensation, Recruiting, and Human Resources. We have custom integrations with our payroll vendor and an internal BI tool. Changes to Compensation calculations, REST APIs, or Redwood UI are High priority for us. Recruiting workflow changes are Medium. Unrelated modules are Low."></textarea>
-        <div class="pi-row">
-          <button class="btn btn-sec" onclick="document.getElementById('pi-txt-input').click()">📄 Upload .txt</button>
+        <div class="pi-row" style="flex-wrap:wrap;gap:6px;align-items:center">
+          <button class="btn btn-sec" id="pi-upload-btn" onclick="document.getElementById('pi-txt-input').click()">📄 Upload .txt</button>
           <input type="file" id="pi-txt-input" accept=".txt" style="display:none" onchange="piFileSelected(this.files[0])">
-          <button class="btn" onclick="saveProjectInstructions()">💾 Save Instructions</button>
-          <button class="btn btn-sec" onclick="clearProjectInstructions()" style="color:var(--text-dim)">✕ Clear</button>
+          <span id="pi-file-badge" style="display:none;align-items:center;gap:4px;background:var(--telus-cloud);border:1px solid var(--telus-mystic);border-radius:4px;padding:2px 8px;font-size:0.82rem">
+            📄 <span id="pi-file-name" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+            <button class="btn btn-sec" onclick="piRemoveFile()" style="padding:1px 6px;font-size:0.78rem;margin-left:4px">✕</button>
+          </span>
+          <button class="btn" onclick="saveProjectInstructions()">💾 Save</button>
+          <button class="btn btn-conclude" onclick="markImpact()" id="pi-mark-btn">⚡ Mark Impact</button>
+        </div>
+        <div id="pi-progress" style="display:none;margin-top:10px">
+          <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:4px">
+            Reclassifying… <span id="pi-prog-text">0 / 0</span>
+          </div>
+          <div style="background:var(--border);border-radius:4px;height:6px;overflow:hidden">
+            <div id="pi-prog-bar" style="background:var(--telus-purple);height:100%;width:0%;transition:width 0.4s"></div>
+          </div>
+        </div>
+        <div style="margin-top:8px">
           <span id="pi-status" class="inactive">Not set — using rule-based ranking</span>
         </div>
       </div>
@@ -2255,6 +2270,9 @@ function closeCfgOnBg(e){
 }
 
 /* ── Project Instructions ────────────────────────────── */
+let _piFromFile=false;          // true when content came from a .txt upload
+let _piPollTimer=null;          // setInterval handle for reclassify polling
+
 function _setPiStatus(active){
   const badge=$('pi-badge'), status=$('pi-status'), btn=$('cfg-btn');
   if(active){
@@ -2269,13 +2287,37 @@ function _setPiStatus(active){
     if(btn) btn.title='Project Config';
   }
 }
+
+function _piSetFileMode(filename){
+  // File uploaded: disable textarea, show file badge, hide upload button text
+  _piFromFile=true;
+  $('pi-textarea').disabled=true;
+  $('pi-textarea').style.opacity='0.45';
+  $('pi-file-name').textContent=filename;
+  $('pi-file-badge').style.display='inline-flex';
+  $('pi-upload-btn').style.display='none';
+}
+
+function _piClearFileMode(){
+  _piFromFile=false;
+  $('pi-textarea').disabled=false;
+  $('pi-textarea').style.opacity='';
+  $('pi-file-badge').style.display='none';
+  $('pi-file-name').textContent='';
+  $('pi-upload-btn').style.display='';
+  $('pi-txt-input').value='';
+}
+
 async function loadProjectInstructions(){
   try{
     const r=await api('/project-context');
     $('pi-textarea').value=r.text||'';
     _setPiStatus(r.active);
+    // If we previously had file mode, keep it only if text is still there
+    if(!r.active) _piClearFileMode();
   }catch(e){ /* silent */ }
 }
+
 async function saveProjectInstructions(){
   const text=$('pi-textarea').value.trim();
   try{
@@ -2290,23 +2332,81 @@ async function saveProjectInstructions(){
       status.textContent=`✓ Saved (${r.length} chars) — LLM will use this context`;
     } else {
       status.textContent='Cleared — using rule-based ranking';
+      _piClearFileMode();
     }
-  }catch(e){$('pi-status').textContent='Error saving: '+e.message;}
+  }catch(e){$('pi-status').textContent='⚠ Error saving: '+e.message;}
 }
-async function clearProjectInstructions(){
+
+function piRemoveFile(){
   $('pi-textarea').value='';
-  await saveProjectInstructions();
+  _piClearFileMode();
+  $('pi-status').textContent='File removed — instructions cleared. Save to confirm.';
+  $('pi-status').className='pi-status inactive';
 }
+
 function piFileSelected(file){
   if(!file) return;
   const reader=new FileReader();
   reader.onload=e=>{
     $('pi-textarea').value=e.target.result;
-    $('pi-status').textContent='File loaded — click Save Instructions to apply';
+    _piSetFileMode(file.name);
+    $('pi-status').textContent='File loaded — click 💾 Save to apply';
     $('pi-status').className='pi-status inactive';
   };
-  reader.readAsText(file, 'utf-8');
-  $('pi-txt-input').value='';
+  reader.readAsText(file,'utf-8');
+}
+
+async function markImpact(){
+  // 1. Save instructions first
+  await saveProjectInstructions();
+  const ctx=$('pi-textarea').value.trim();
+  if(!ctx){
+    $('pi-status').textContent='⚠ No instructions saved — add text or upload a file first.';
+    return;
+  }
+  // 2. Start reclassify job
+  try{
+    const r=await api('/reclassify-all',{method:'POST'});
+    if(r.status==='already_running'){
+      $('pi-status').textContent='⏳ Already running…';
+      _piStartPolling();
+      return;
+    }
+  }catch(e){
+    $('pi-status').textContent='⚠ Failed to start: '+e.message;
+    return;
+  }
+  $('pi-status').textContent='⏳ Reclassification started…';
+  $('pi-status').className='pi-status active';
+  $('pi-mark-btn').disabled=true;
+  _piStartPolling();
+}
+
+function _piStartPolling(){
+  if(_piPollTimer) clearInterval(_piPollTimer);
+  $('pi-progress').style.display='block';
+  _piPollTimer=setInterval(async()=>{
+    try{
+      const s=await api('/reclassify-status');
+      const done=s.done||0, total=s.total||0;
+      $('pi-prog-text').textContent=`${done} / ${total}`;
+      $('pi-prog-bar').style.width=total>0?`${Math.round(done/total*100)}%`:'0%';
+      if(!s.running){
+        clearInterval(_piPollTimer);
+        _piPollTimer=null;
+        $('pi-progress').style.display='none';
+        $('pi-mark-btn').disabled=false;
+        if(s.error){
+          $('pi-status').textContent='⚠ Error: '+s.error;
+          $('pi-status').className='pi-status inactive';
+        } else {
+          $('pi-status').textContent=`✓ Done — ${done} record(s) reclassified`;
+          $('pi-status').className='pi-status active';
+          loadAll();   // refresh the item list with updated impact levels
+        }
+      }
+    }catch(e){ /* network hiccup — keep polling */ }
+  },2000);
 }
 function cfgDragOver(e){
   e.preventDefault();
