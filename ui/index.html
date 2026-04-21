@@ -510,7 +510,7 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
   <div class="vsep"></div>
   <label style="color:var(--text-dim)">Category</label>
   <select id="f-cat" onchange="applyFilters()">
-    <option value="">All</option><option value="OCI">OCI</option><option value="OIC">OIC</option><option value="HCM">HCM</option>
+    <option value="">All</option>
   </select>
   <label style="color:var(--text-dim)">Impact</label>
   <select id="f-imp" onchange="applyFilters()">
@@ -776,7 +776,11 @@ async function api(path,opts={}){
 async function loadAll(){
   setStatus('Loading…');
   try{
-    const [updates,stats]=await Promise.all([api('/updates?limit=5000'),api('/stats')]);
+    const [updates,stats,cats]=await Promise.all([
+      api('/updates?limit=5000'),
+      api('/stats'),
+      api('/categories'),
+    ]);
     ALL=updates;
     ALL.sort((a,b)=>{
       const da=a.release_date, db=b.release_date;
@@ -786,14 +790,27 @@ async function loadAll(){
       return db.localeCompare(da);
     });
     _lastCrawlRun=stats.last_run;
-    // Populate version dropdown (newest first, e.g. 26B > 26A > 25D)
-    const sel=$('f-ver');
-    const prevVer=sel.value;
+
+    // ── Populate category dropdown from live DB data ─────────────────────
+    const catSel=$('f-cat');
+    const prevCat=catSel.value;
+    catSel.innerHTML='<option value="">All</option>';
+    cats.forEach(c=>{
+      const o=document.createElement('option');
+      o.value=c; o.textContent=c;
+      if(c===prevCat) o.selected=true;
+      catSel.appendChild(o);
+    });
+
+    // ── Populate version dropdown (newest first, e.g. 26B > 26A > 25D) ──
+    const verSel=$('f-ver');
+    const prevVer=verSel.value;
     const codes=[...new Set(ALL.map(u=>u.release_code).filter(Boolean))];
     codes.sort((a,b)=>b.localeCompare(a));
-    sel.innerHTML='<option value="">All Versions</option>';
-    codes.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;sel.appendChild(o);});
-    if(prevVer&&codes.includes(prevVer))sel.value=prevVer;
+    verSel.innerHTML='<option value="">All Versions</option>';
+    codes.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;verSel.appendChild(o);});
+    if(prevVer&&codes.includes(prevVer))verSel.value=prevVer;
+
     renderTree(ALL);renderTable(ALL);renderStats(computeStatsFromItems(ALL));
     const nw=ALL.filter(u=>u.is_new).length;
     $('sidebar-meta').textContent=`${ALL.length}${nw?' · ✦'+nw:''}`;
@@ -1056,7 +1073,14 @@ function renderTree(items){
     });
 
     verKeys.forEach(code=>{
-      const its=verGrp[code], nw=its.filter(i=>i.is_new).length;
+      const its=verGrp[code];
+      // Count total items in this group including all children
+      const totalInVer=its.reduce((n,item)=>n+1+(childrenOf[item.title]||[]).filter(c=>visSet.has(c.title)).length,0);
+      const newInVer=its.reduce((n,item)=>{
+        let c=item.is_new?1:0;
+        c+=(childrenOf[item.title]||[]).filter(ch=>visSet.has(ch.title)&&ch.is_new).length;
+        return n+c;
+      },0);
       // Human-readable date for the code
       const qMap={A:'Q1 Jan',B:'Q2 Apr',C:'Q3 Jul',D:'Q4 Oct'};
       const dateHint=code!=='—'
@@ -1068,10 +1092,9 @@ function renderTree(items){
         `<span>${code}</span>`+
         `<span class="t-ver-badge">${dateHint}</span>`+
         `<span style="color:var(--text-dim);font-size:0.8rem;margin-left:auto">`+
-          `${its.length}${nw?' · <span style="color:var(--accent2)">✦'+nw+'</span>':''}</span>`;
+          `${totalInVer}${newInVer?' · <span style="color:var(--accent2)">✦'+newInVer+'</span>':''}</span>`;
       const verBody=el('div');
-      // In AI mode auto-expand all version groups so items are immediately clickable
-      if(aiMode) verBody.style.display='';
+      // Always start expanded so users can see all items without extra clicks
       verEl.onclick=()=>verBody.style.display=verBody.style.display==='none'?'':'none';
       tree.appendChild(verEl);tree.appendChild(verBody);
       sortItems(its).forEach(item=>{
@@ -1086,18 +1109,25 @@ function renderTree(items){
   } else {
     // ── Category grouping ─────────────────────────────────
     Object.keys(grp).sort().forEach(cat=>{
-      const svcs=grp[cat],total=Object.values(svcs).reduce((n,a)=>n+a.length,0);
-      const catEl=el('div','t-cat',`${CI[cat]||'☁'} ${cat}  (${total})`);
+      const svcs=grp[cat];
+      // Count including children for accurate totals
+      const totalCat=Object.values(svcs).reduce((n,arr)=>
+        arr.reduce((m,item)=>m+1+(childrenOf[item.title]||[]).filter(c=>visSet.has(c.title)).length,n),0);
+      const catEl=el('div','t-cat',`${CI[cat]||'☁'} ${cat}  (${totalCat})`);
       const catBody=el('div');
-      // In AI mode: categories start expanded so items are immediately clickable
       catEl.onclick=()=>catBody.style.display=catBody.style.display==='none'?'':'none';
       tree.appendChild(catEl);tree.appendChild(catBody);
       Object.keys(svcs).sort().forEach(svc=>{
-        const its=svcs[svc],nw=its.filter(i=>i.is_new).length;
-        const svcEl=el('div','t-svc',`${SI[svc]||'📋'} ${svc}  (${its.length})`+
-          (nw?`  <span style="color:var(--accent2);font-size:10px">✦${nw}</span>`:''));
+        const its=svcs[svc];
+        const totalSvc=its.reduce((n,item)=>n+1+(childrenOf[item.title]||[]).filter(c=>visSet.has(c.title)).length,0);
+        const newSvc=its.reduce((n,item)=>{
+          let c=item.is_new?1:0;
+          c+=(childrenOf[item.title]||[]).filter(ch=>visSet.has(ch.title)&&ch.is_new).length;
+          return n+c;
+        },0);
+        const svcEl=el('div','t-svc',`${SI[svc]||'📋'} ${svc}  (${totalSvc})`+
+          (newSvc?`  <span style="color:var(--accent2);font-size:10px">✦${newSvc}</span>`:''));
         const svcBody=el('div');
-        // In AI mode: service groups start expanded too
         if(aiMode) svcBody.style.display='';
         svcEl.onclick=()=>svcBody.style.display=svcBody.style.display==='none'?'':'none';
         catBody.appendChild(svcEl);catBody.appendChild(svcBody);

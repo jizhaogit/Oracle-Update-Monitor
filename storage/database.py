@@ -423,6 +423,38 @@ def delete_by_category(categories: list[str]) -> int:
     return n
 
 
+def delete_legacy_records() -> int:
+    """
+    Delete all records that are not HCM What's New readiness data:
+      • Any record whose category is OCI or OIC
+      • Any HCM record whose doc_type is NOT 'whats_new'
+        (e.g. legacy REST API mock records inserted before the HCM-only reconfiguration)
+
+    Returns the total number of rows deleted.
+    """
+    from sqlalchemy import and_, or_
+    with session_scope() as s:
+        rows = s.query(OracleUpdate).filter(
+            or_(
+                OracleUpdate.category.in_(["OCI", "OIC"]),
+                and_(
+                    OracleUpdate.category == "HCM",
+                    OracleUpdate.doc_type  != "whats_new",
+                ),
+            )
+        ).all()
+        ids = [r.id for r in rows]
+        if ids:
+            s.query(UpdateVersion).filter(UpdateVersion.update_id.in_(ids)).delete(
+                synchronize_session=False
+            )
+        n = len(rows)
+        for r in rows:
+            s.delete(r)
+    log.info("delete_legacy_records: removed %d record(s)", n)
+    return n
+
+
 # ── Version history ────────────────────────────────────────────────────────────
 
 def get_versions(update_id: int) -> list[dict]:

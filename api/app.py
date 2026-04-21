@@ -38,7 +38,7 @@ from storage.database import (
     list_crawl_runs, list_updates, multi_keyword_search,
     set_comment, set_flag, set_impact,
     get_distinct_categories, get_distinct_services, mark_all_seen,
-    delete_by_category,
+    delete_by_category, delete_legacy_records,
 )
 from processor.summarizer import ask as qa_ask
 from processor.analyzer import analyze_impact
@@ -210,13 +210,15 @@ def mark_seen():
 @app.post("/purge-non-hcm")
 def purge_non_hcm():
     """
-    Delete all records whose category is OCI or OIC.
-    Useful for cleaning up legacy mock/seed data that was inserted before
-    the app was reconfigured to crawl HCM Readiness exclusively.
+    Delete all legacy/non-readiness records:
+      - Any OCI or OIC category records
+      - Any HCM records that are NOT doc_type='whats_new'
+        (e.g. legacy REST API mock entries)
+    Useful for cleaning up data inserted before the HCM-only reconfiguration.
     """
-    n = delete_by_category(["OCI", "OIC"])
-    log.info("Purged %d non-HCM records via /purge-non-hcm", n)
-    return {"deleted": n, "message": f"Removed {n} OCI/OIC record(s) from the database."}
+    n = delete_legacy_records()
+    log.info("Purged %d legacy record(s) via /purge-non-hcm", n)
+    return {"deleted": n, "message": f"Removed {n} legacy record(s) from the database."}
 
 
 @app.post("/ask")
