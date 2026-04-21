@@ -529,6 +529,7 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
   <div class="vsep"></div>
   <button class="btn btn-sec" onclick="loadAll()">↺ Refresh</button>
   <button class="btn btn-sec" onclick="markSeen()" title="Mark Seen">✓</button>
+  <button class="btn btn-sec" onclick="purgeNonHcm()" title="Remove legacy OCI/OIC sample records" style="color:var(--telus-crimson);border-color:var(--telus-crimson)">🗑 Clean Legacy</button>
   <button class="btn" onclick="triggerCrawl()">▶ Crawl Now</button>
   <div class="vsep"></div>
   <!-- Conclusion button with selected-count badge -->
@@ -1542,6 +1543,13 @@ async function markSeen(){
   try{const r=await api('/mark-seen',{method:'POST'});
     setStatus(`Marked ${r.marked_seen} updates as seen`);loadAll();
   }catch(e){}
+}
+async function purgeNonHcm(){
+  if(!confirm('Remove all legacy OCI/OIC records from the database?\nThis deletes sample data inserted before the HCM-only reconfiguration.\nReal HCM crawl data is NOT affected.'))return;
+  try{
+    const r=await api('/purge-non-hcm',{method:'POST'});
+    setStatus(r.message);loadAll();
+  }catch(e){setStatus('Purge error: '+e.message);}
 }
 
 /* ── Flag for Review ───────────────────────────────────── */

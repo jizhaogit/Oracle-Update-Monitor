@@ -400,10 +400,13 @@ def run_crawl(seed_mock: bool = True) -> dict:
             if is_new:
                 total_new += 1
 
-    # ── HCM What's New mock seeding ───────────────────────────────────────────
-    # Always ensure the 26A mock records (parent + children) are present so the
-    # app has meaningful data even before the first live crawl succeeds.
-    if seed_mock:
+    # ── Mock/seed fallback ────────────────────────────────────────────────────
+    # If the live crawl returned nothing, seed a small set of HCM sample records
+    # so the UI is never empty on first run or when the network is unavailable.
+    # Only HCM What's New records are seeded — OCI/OIC mocks are intentionally
+    # excluded because this app is focused on HCM Readiness.
+    if seed_mock and not any_real:
+        log.info("No live pages fetched — seeding HCM sample data as fallback")
         for mock_rec in get_mock_records():
             if (mock_rec.get("category") == "HCM"
                     and mock_rec.get("doc_type") == "whats_new"):
@@ -417,20 +420,6 @@ def run_crawl(seed_mock: bool = True) -> dict:
                 total_found += 1
                 if is_new:
                     total_new += 1
-
-    # ── Full mock/seed fallback (all sources failed) ───────────────────────────
-    if not any_real and seed_mock:
-        log.info("No live pages fetched — seeding mock data")
-        mock_records = get_mock_records()
-        for rec in mock_records:
-            rec = classify(rec)
-            if not rec.get("summary"):
-                rec["summary"] = rule_based_summary(rec["title"], rec["content"])
-
-            stored, is_new = upsert_update(rec)
-            total_found += 1
-            if is_new:
-                total_new += 1
 
     finish_crawl_run(run_id, sources_done, total_found, total_new, "success")
     log.info("Crawl finished: %d found, %d new", total_found, total_new)

@@ -400,6 +400,29 @@ def mark_all_seen() -> int:
     return n
 
 
+def delete_by_category(categories: list[str]) -> int:
+    """
+    Permanently delete all OracleUpdate rows whose category is in *categories*.
+    Also removes any associated UpdateVersion rows (cascade via Python loop).
+
+    Returns the number of rows deleted from oracle_updates.
+    """
+    if not categories:
+        return 0
+    with session_scope() as s:
+        rows = s.query(OracleUpdate).filter(OracleUpdate.category.in_(categories)).all()
+        ids  = [r.id for r in rows]
+        if ids:
+            s.query(UpdateVersion).filter(UpdateVersion.update_id.in_(ids)).delete(
+                synchronize_session=False
+            )
+        n = len(rows)
+        for r in rows:
+            s.delete(r)
+    log.info("Deleted %d record(s) with category in %s", n, categories)
+    return n
+
+
 # ── Version history ────────────────────────────────────────────────────────────
 
 def get_versions(update_id: int) -> list[dict]:

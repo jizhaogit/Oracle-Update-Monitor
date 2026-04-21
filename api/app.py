@@ -12,6 +12,7 @@ GET  /services            — distinct service list
 GET  /crawl-runs          — crawl audit log
 POST /crawl               — trigger manual crawl
 POST /mark-seen           — mark all new → seen
+POST /purge-non-hcm       — delete legacy OCI/OIC records from the database
 POST /ask                 — Q&A over stored documents
 """
 
@@ -37,6 +38,7 @@ from storage.database import (
     list_crawl_runs, list_updates, multi_keyword_search,
     set_comment, set_flag, set_impact,
     get_distinct_categories, get_distinct_services, mark_all_seen,
+    delete_by_category,
 )
 from processor.summarizer import ask as qa_ask
 from processor.analyzer import analyze_impact
@@ -203,6 +205,18 @@ def trigger_crawl():
 def mark_seen():
     n = mark_all_seen()
     return {"marked_seen": n}
+
+
+@app.post("/purge-non-hcm")
+def purge_non_hcm():
+    """
+    Delete all records whose category is OCI or OIC.
+    Useful for cleaning up legacy mock/seed data that was inserted before
+    the app was reconfigured to crawl HCM Readiness exclusively.
+    """
+    n = delete_by_category(["OCI", "OIC"])
+    log.info("Purged %d non-HCM records via /purge-non-hcm", n)
+    return {"deleted": n, "message": f"Removed {n} OCI/OIC record(s) from the database."}
 
 
 @app.post("/ask")
