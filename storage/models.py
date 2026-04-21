@@ -56,6 +56,17 @@ class OracleUpdate(Base):
     # user_comment: free-text note from the user, independent of flag.
     user_comment      = Column(Text,    nullable=True)
 
+    # ── PSA / TES project tracking fields ─────────────────────────────────────
+    # User-managed fields for internal project tracking.
+    # Never touched by the crawler — purely manual input from the UI.
+    tes_owner         = Column(String(200), nullable=True)   # TES Owner
+    psa_owner         = Column(String(200), nullable=True)   # PSA Owner
+    function_category = Column(String(200), nullable=True)   # Function Category
+    next_action       = Column(Text,        nullable=True)   # Next Action Required for PSA Project
+    profile_options   = Column(Text,        nullable=True)   # Profile Options Already On
+    psa_comments      = Column(Text,        nullable=True)   # PSA Comments
+    tes_status        = Column(String(100), nullable=True)   # TES Status
+
     # ── Tag helpers ───────────────────────────────────────────────────────────
     @property
     def tags(self) -> list[str]:
@@ -93,6 +104,14 @@ class OracleUpdate(Base):
             "flag_note":          self.flag_note or "",
             "impact_overridden":  bool(self.impact_overridden),
             "user_comment":       self.user_comment or "",
+            # PSA / TES tracking fields
+            "tes_owner":          self.tes_owner or "",
+            "psa_owner":          self.psa_owner or "",
+            "function_category":  self.function_category or "",
+            "next_action":        self.next_action or "",
+            "profile_options":    self.profile_options or "",
+            "psa_comments":       self.psa_comments or "",
+            "tes_status":         self.tes_status or "",
         }
 
     def __repr__(self) -> str:
