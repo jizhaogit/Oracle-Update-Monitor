@@ -992,8 +992,10 @@ function renderTree(items){
     const hasKids=children.length>0;
 
     const label=isChild
-      ? item.title.slice((parentOf[item.title]||'').length+3)  // strip "Parent — "
-      : item.title.replace(/^HCM\s*\u2014\s*/,'');             // strip leading "HCM — "
+      ? item.title.slice((parentOf[item.title]||'').length+3)        // strip "Parent — "
+      : item.category==='HCM'
+        ? item.title.replace(/^HCM\s*\u2014\s*/,'')                  // strip redundant "HCM — "
+        : (CI[item.category]||'')+' '+(item.category||'')+' \u2014 '+item.title; // "🔗 OIC — October 2025"
 
     const cls='t-item'+(item.is_new?' isnew':'')+
       (imp==='High'?' hi':imp==='Medium'?' me':imp==='Low'?' lo':'')+
