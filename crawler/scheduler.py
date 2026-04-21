@@ -16,13 +16,15 @@ from urllib.parse import urljoin
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from config import CRAWL_INTERVAL_HOURS, CRAWL_ON_STARTUP, CRAWL_SCHEDULE_ENABLED, HCM_EXTRA_RELEASES, ORACLE_SOURCES
+from config import CRAWL_INTERVAL_HOURS, CRAWL_ON_STARTUP, CRAWL_SCHEDULE_ENABLED, HCM_EXTRA_RELEASES, HCM_MODULE_KEYWORDS, ORACLE_SOURCES
 from crawler.fetcher import fetch_page
 from crawler.parser import (
     get_mock_records,
     parse_hcm_detail_page,
     parse_hcm_feature_page,
+    parse_readiness_hub_modules,
     parse_hcm_hub_modules,
+    parse_common_hub_modules,
     parse_hcm_toc,
     parse_oracle_page,
     _parse_oracle_release,
@@ -59,81 +61,111 @@ def _store_rec(rec: dict, source_name: str) -> bool:
     return is_new
 
 
-def _crawl_hcm_readiness(
+def _crawl_readiness_hub(
     source_name: str,
     source_url: str,
     category: str,
     service: str,
     doc_type: str,
+    module_keywords: Optional[list[str]] = None,
+    path_prefix: str = "hcm",
 ) -> tuple[int, int]:
     """
-    Full three-step HCM readiness crawl:
-      1. Fetch hcm.html → parse embedded JSON to get the module list.
-      2. For each module: store a parent record, then fetch toc.htm for feature URLs.
-      3. For each feature URL: fetch, parse, and store as a child record titled
+    Full three-step Oracle Fusion readiness crawl for any hub page
+    (hcm.html, common.html, etc.):
+
+      1. Fetch hub page → parse embedded JSON to get the module list.
+      2. Apply keyword filter (if configured) to select only matching modules.
+      3. For each module: store a parent record, then fetch toc.htm for feature URLs.
+      4. For each feature URL: fetch, parse, and store as a child record titled
          "{parent_title} — {feature_title}".
 
-    hcm.html is fully JS-rendered, but the server inlines a script block that
-    lists all module paths so we can discover every module without JS execution.
+    The hub is fully JS-rendered but the server inlines a script block that
+    lists all module paths, so no browser automation is required.
+
+    Parameters
+    ----------
+    module_keywords : list of strings (case-insensitive substring match against
+                      module titles).  None or empty = crawl all modules.
+    path_prefix     : "hcm" for hcm.html, "common" for common.html.
 
     Returns (total_found, total_new).
     """
     html, page_date = fetch_page(source_url)
     if not html:
-        log.warning("HCM hub page unreachable: %s", source_url)
+        log.warning("Readiness hub unreachable: %s", source_url)
         return 0, 0
 
     save_raw_page(source_name, source_url, html, category)
 
-    modules = parse_hcm_hub_modules(html)
+    modules = parse_readiness_hub_modules(html, path_prefix=path_prefix)
     if not modules:
-        log.warning("No HCM modules found in hub page — JS may not have been inlined")
+        log.warning("No modules found in hub page %s — JS may not have been inlined",
+                    source_url)
         return 0, 0
 
-    # ── Expand with previous-release equivalents ──────────────────────────
-    # The hub only lists the current release for each module (e.g. 26B).
-    # For each extra release in HCM_EXTRA_RELEASES (default: ["26A"]),
-    # derive the equivalent path by substituting the release code.
-    # Example: "hcm/26b/comp-26b/index.html" → "hcm/26a/comp-26a/index.html"
-    existing_paths: set[str] = {m["path"] for m in modules}
-    for extra_rc in HCM_EXTRA_RELEASES:
-        extra_lower = extra_rc.lower()   # e.g. "26a"
-        for mod in list(modules):
-            # Match pattern: hcm/{hub_rc}/{module_code}-{hub_rc}/index.html
-            m = re.match(r"hcm/(\w+)/(\w+)-(\w+)/index\.html", mod["path"])
-            if not m:
-                continue
-            hub_rc      = m.group(1)     # e.g. "26b"
-            module_code = m.group(2)     # e.g. "comp"
-            if hub_rc.lower() == extra_lower:
-                continue                  # already this release
-            new_path  = f"hcm/{extra_lower}/{module_code}-{extra_lower}/index.html"
-            if new_path in existing_paths:
-                continue
-            new_title = re.sub(r"\b\d{2}[A-D]\b", extra_rc,
-                                mod["title"], flags=re.IGNORECASE)
-            existing_paths.add(new_path)
-            modules.append({"title": new_title, "path": new_path})
+    # ── Keyword filter ────────────────────────────────────────────────────
+    if module_keywords:
+        kws_lower = [k.lower() for k in module_keywords]
+        filtered = [
+            m for m in modules
+            if any(kw in m["title"].lower() for kw in kws_lower)
+        ]
+        log.info(
+            "Module keyword filter applied: %d → %d modules  (keywords: %s)",
+            len(modules), len(filtered),
+            ", ".join(module_keywords),
+        )
+        modules = filtered
 
-    log.info("HCM hub: crawling %d modules (incl. extra releases: %s) …",
-             min(len(modules), _HCM_MAX_MODULES), HCM_EXTRA_RELEASES)
+    if not modules:
+        log.warning("No modules matched keyword filter for %s — check HCM_MODULE_KEYWORDS",
+                    source_url)
+        return 0, 0
+
+    # ── Expand with previous-release equivalents (HCM hub only) ──────────
+    # The hub only lists the current release (e.g. 26B).  For each extra
+    # release in HCM_EXTRA_RELEASES we derive the equivalent path.
+    # Pattern only applies to HCM paths: hcm/{rc}/{code}-{rc}/index.html
+    if path_prefix == "hcm":
+        existing_paths: set[str] = {m["path"] for m in modules}
+        for extra_rc in HCM_EXTRA_RELEASES:
+            extra_lower = extra_rc.lower()
+            for mod in list(modules):
+                m = re.match(r"hcm/(\w+)/(\w+)-(\w+)/index\.html", mod["path"])
+                if not m:
+                    continue
+                hub_rc      = m.group(1)
+                module_code = m.group(2)
+                if hub_rc.lower() == extra_lower:
+                    continue
+                new_path = f"hcm/{extra_lower}/{module_code}-{extra_lower}/index.html"
+                if new_path in existing_paths:
+                    continue
+                new_title = re.sub(r"\b\d{2}[A-D]\b", extra_rc,
+                                   mod["title"], flags=re.IGNORECASE)
+                existing_paths.add(new_path)
+                modules.append({"title": new_title, "path": new_path})
+
+    log.info("Readiness hub (%s): crawling %d modules (extra releases: %s) …",
+             path_prefix, min(len(modules), _HCM_MAX_MODULES), HCM_EXTRA_RELEASES)
+
     total_found = 0
     total_new   = 0
 
     for mod in modules[:_HCM_MAX_MODULES]:
-        mod_title    = mod["title"]           # e.g. "Payroll What's New 26B"
-        mod_path     = mod["path"]            # e.g. "hcm/26b/payr-26b/index.html"
-        parent_title = f"HCM — {mod_title}"  # e.g. "HCM — Payroll What's New 26B"
+        mod_title    = mod["title"]
+        mod_path     = mod["path"]
+        parent_title = f"HCM — {mod_title}"
         mod_url      = urljoin(_HCM_READINESS_BASE, mod_path)
 
-        # Release code & date from the module title (e.g. "26B" → Apr 2026)
         rel_date, rel_code = _parse_oracle_release(mod_title)
         if not rel_date and page_date:
             rel_date = page_date
 
         # ── Parent record (one per module) ────────────────────────────────
         parent_content = (
-            f"Oracle Fusion Cloud HCM {mod_title}. "
+            f"Oracle Fusion Cloud {mod_title}. "
             "See individual feature entries below for full details."
         )
         parent_hash = hashlib.sha256(
@@ -143,7 +175,7 @@ def _crawl_hcm_readiness(
             "source_name":  source_name,
             "source_url":   mod_url,
             "category":     category,
-            "service":      service,
+            "service":      mod_title.split(" What's New")[0].strip(),  # use module name as service
             "doc_type":     doc_type,
             "title":        parent_title[:480],
             "content":      parent_content,
@@ -167,7 +199,7 @@ def _crawl_hcm_readiness(
 
         toc_html, _ = fetch_page(toc_url)
         if not toc_html:
-            log.warning("  HCM toc unreachable: %s", toc_url)
+            log.warning("  Toc unreachable: %s", toc_url)
             continue
 
         feature_urls = parse_hcm_toc(toc_html, toc_url)
@@ -181,12 +213,13 @@ def _crawl_hcm_readiness(
 
             child_rec = parse_hcm_feature_page(
                 feat_html, parent_title, feat_url,
-                source_name, category, service, doc_type,
+                source_name, category,
+                mod_title.split(" What's New")[0].strip(),
+                doc_type,
             )
             if not child_rec:
                 continue
 
-            # Use page Last-Modified as date fallback
             if not child_rec.get("release_date") and feat_date:
                 child_rec["release_date"] = feat_date
             if not child_rec.get("release_code") and rel_code:
@@ -197,8 +230,18 @@ def _crawl_hcm_readiness(
             if is_new:
                 total_new += 1
 
-    log.info("HCM readiness crawl complete: %d found, %d new", total_found, total_new)
+    log.info("Readiness crawl (%s) complete: %d found, %d new",
+             path_prefix, total_found, total_new)
     return total_found, total_new
+
+
+# Keep old name as alias so any external callers are not broken
+def _crawl_hcm_readiness(source_name, source_url, category, service, doc_type):
+    return _crawl_readiness_hub(
+        source_name, source_url, category, service, doc_type,
+        module_keywords=HCM_MODULE_KEYWORDS or None,
+        path_prefix="hcm",
+    )
 
 
 def _follow_hcm_detail_links(
@@ -297,15 +340,25 @@ def run_crawl(seed_mock: bool = True) -> dict:
         service  = meta["service"]
         doc_type = meta["doc_type"]
 
-        # ── HCM What's New: dedicated multi-step crawl ────────────────────
-        # The hub page (hcm.html) is fully JS-rendered but inlines a script
-        # block listing all module paths.  We parse that JSON, then crawl
-        # each module's toc.htm and individual feature pages directly.
-        if category == "HCM" and doc_type == "whats_new":
+        # ── Readiness hub sources: multi-step crawl with keyword filter ──────
+        # Both hcm.html and common.html are fully JS-rendered but inline a
+        # script block listing all module paths.  We parse that JSON, apply
+        # the keyword filter from HCM_MODULE_KEYWORDS, then crawl each
+        # matching module's toc.htm and individual feature pages directly.
+        if doc_type == "whats_new" and "readiness" in url:
             sources_done += 1
-            log.info("HCM readiness hub — starting multi-step crawl …")
-            d_found, d_new = _crawl_hcm_readiness(
-                source_name, url, category, service, doc_type
+            keywords = HCM_MODULE_KEYWORDS if HCM_MODULE_KEYWORDS else None
+            # Determine path prefix from the hub URL
+            if "common.html" in url:
+                prefix = "common"
+                log.info("Common Technologies readiness hub — starting multi-step crawl …")
+            else:
+                prefix = "hcm"
+                log.info("HCM readiness hub — starting multi-step crawl …")
+            d_found, d_new = _crawl_readiness_hub(
+                source_name, url, category, service, doc_type,
+                module_keywords=keywords,
+                path_prefix=prefix,
             )
             total_found += d_found
             total_new   += d_new

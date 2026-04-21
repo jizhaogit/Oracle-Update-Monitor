@@ -477,13 +477,15 @@ def _try_hcm_readiness(soup: BeautifulSoup) -> list[dict]:
     return items
 
 
-def parse_hcm_hub_modules(html: str) -> list[dict]:
+def parse_readiness_hub_modules(html: str, path_prefix: str = "hcm") -> list[dict]:
     """
-    Extract the HCM module list from the embedded JSON inside hcm.html.
+    Extract the module list from an Oracle Fusion readiness hub page.
 
-    hcm.html is fully JS-rendered but the server inlines a JavaScript variable
-    that contains a JSON-like array of all module entries, e.g.:
+    Works for both hcm.html (path_prefix="hcm") and common.html
+    (path_prefix="common").  The server inlines a JavaScript variable
+    containing a JSON-like array of module entries, e.g.:
         {"title": "Payroll What's New 26B", "html": "hcm/26b/payr-26b/index.html", "position": 23}
+        {"title": "Common Technologies ... 26B", "html": "common/26b/common26b/index.html", "position": 1}
 
     Returns a list of {"title": ..., "path": ...} dicts.
     """
@@ -495,24 +497,24 @@ def parse_hcm_hub_modules(html: str) -> list[dict]:
     soup = BeautifulSoup(html, "lxml")
     modules: list[dict] = []
     seen: set[str]      = set()
+    key = f'"{path_prefix}/'
 
     for script in soup.find_all("script"):
         text = script.string or ""
-        if '"hcm/' not in text:
+        if key not in text:
             continue
 
-        # Each module object looks like: {"title":"...","html":"hcm/...","position":N}
-        # They may be nested in a larger array or JS assignment.
-        for m in re.finditer(
-            r'\{[^{}]*?"html"\s*:\s*"(hcm/[^"]+\.html)"[^{}]*?\}',
-            text,
-            re.DOTALL,
-        ):
+        # Each module object looks like: {"title":"...","html":"PREFIX/...","position":N}
+        pattern = (
+            r'\{[^{}]*?"html"\s*:\s*"('
+            + re.escape(path_prefix)
+            + r'/[^"]+\.html)"[^{}]*?\}'
+        )
+        for m in re.finditer(pattern, text, re.DOTALL):
             obj_str = m.group(0)
             path    = m.group(1)
             if path in seen:
                 continue
-            # Try proper JSON parse first
             try:
                 entry = _json.loads(obj_str)
                 title = entry.get("title", "")
@@ -524,8 +526,18 @@ def parse_hcm_hub_modules(html: str) -> list[dict]:
                 seen.add(path)
                 modules.append({"title": title, "path": path})
 
-    log.info("HCM hub: found %d modules", len(modules))
+    log.info("Readiness hub (%s): found %d modules", path_prefix, len(modules))
     return modules
+
+
+def parse_hcm_hub_modules(html: str) -> list[dict]:
+    """Extract HCM module list from hcm.html. Wrapper for parse_readiness_hub_modules."""
+    return parse_readiness_hub_modules(html, path_prefix="hcm")
+
+
+def parse_common_hub_modules(html: str) -> list[dict]:
+    """Extract Common Technologies module list from common.html."""
+    return parse_readiness_hub_modules(html, path_prefix="common")
 
 
 def parse_hcm_toc(html: str, toc_url: str) -> list[str]:
