@@ -567,9 +567,14 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
     <option value="">All</option>
     <option value="flagged">🚩 Flagged</option>
   </select>
+  <label style="color:var(--text-dim)">Redwood</label>
+  <select id="f-redwood" onchange="applyFilters()">
+    <option value="">All</option>
+    <option value="redwood">🖥 Redwood</option>
+    <option value="other">Other</option>
+  </select>
   <div class="vsep"></div>
-  <!-- Refresh button hidden — call loadAll() from browser console if needed -->
-  <button class="btn btn-sec" onclick="markSeen()" title="Mark Seen">✓</button>
+  <!-- Mark Seen button hidden — call markSeen() from browser console if needed -->
   <!-- Clean Legacy button hidden — call purgeNonHcm() from browser console if needed -->
   <button class="btn" onclick="triggerCrawl()">▶ Crawl Now</button>
   <div class="vsep"></div>
@@ -949,7 +954,8 @@ async function loadAll(){
 
 /* ── Filters ───────────────────────────────────────────── */
 function getFiltered(){
-  const mod=$('f-mod').value, imp=$('f-imp').value, flg=$('f-flag').value, ver=$('f-ver').value;
+  const mod=$('f-mod').value, imp=$('f-imp').value, flg=$('f-flag').value,
+        ver=$('f-ver').value, rdw=$('f-redwood').value;
   const base=_aiSearchResults!==null?_aiSearchResults:ALL;
   return base.filter(u=>{
     // Module filter: for non-HCM category values (e.g. "OIC") match on category;
@@ -958,6 +964,9 @@ function getFiltered(){
     if(imp&&u.impact_level!==imp)return false;
     if(flg==='flagged'&&!u.is_flagged)return false;
     if(ver&&u.release_code!==ver)return false;
+    const isRedwood=(u.tags||[]).includes('Redwood UI');
+    if(rdw==='redwood'&&!isRedwood)return false;
+    if(rdw==='other'&&isRedwood)return false;
     return true;
   });
 }
@@ -1669,7 +1678,7 @@ function exportStatsCSV(){
   const ver=$('f-ver').value;
   const title=ver?`Oracle Update Report ${ver}`:'Oracle Update Report';
   const cols=[
-    'Topic','Category','Version','Impact Level','Auto',
+    'Topic','Category','Version','Impact Level','Auto','Redwood',
     'Jira Link','Customize Note',
     'TES Owner','PSA Owner','Function Category','TES Status',
     'Next Action Required for PSA Project',
@@ -1687,6 +1696,7 @@ function exportStatsCSV(){
       u.release_code||'',
       u.impact_level||'',
       isAutoEnabled(u)?'Auto':'N/A',
+      (u.tags||[]).includes('Redwood UI')?'Yes':'',
       u.flag_note||'',
       u.user_comment||'',
       u.tes_owner||'',
