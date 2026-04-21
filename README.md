@@ -14,6 +14,10 @@ An intelligent, self-contained tool for tracking Oracle Cloud Infrastructure (OC
 6. [Quick Start](#quick-start)
 7. [Running as a Web App (Server Mode)](#running-as-a-web-app-server-mode)
 8. [Deploying on Google Cloud Platform (GCP)](#deploying-on-google-cloud-platform-gcp)
+   - [About proxies on GCP](#about-proxies-on-gcp)
+   - [Step-by-step: Compute Engine VM](#step-by-step-compute-engine-vm-deployment)
+   - [Step-by-step: Docker on Compute Engine](#step-by-step-docker-deployment-on-compute-engine)
+   - [Cost summary](#cost-summary)
 9. [Configuration](#configuration)
 10. [Using the UI](#using-the-ui)
     - [Toolbar](#toolbar)
@@ -445,69 +449,172 @@ nssm start OracleMonitor
 
 ## Deploying on Google Cloud Platform (GCP)
 
-The app has two constraints that shape the right GCP service choice:
+### Prerequisites
+
+- A GCP account with billing enabled
+- [Google Cloud SDK (`gcloud`)](https://cloud.google.com/sdk/docs/install) installed on your local machine
+- A GCP project created (`gcloud projects create my-project` or via the Console)
+
+### About proxies on GCP
+
+> **No proxy configuration is needed on GCP.**
+>
+> The Telus VPN proxy (`pac.tsl.telus.com`) is only required when running on a machine inside the Telus corporate network. A GCP VM sits directly on the public internet and can reach PyPI, Oracle docs, and all other external URLs without any proxy.
+>
+> | | Your Telus laptop | GCP VM |
+> |---|---|---|
+> | PyPI (`pypi.org`) | Needs proxy | ✅ Direct access |
+> | Oracle docs (`docs.oracle.com`) | Needs proxy | ✅ Direct access |
+> | `pac.tsl.telus.com` | ✅ Reachable (Telus internal) | ❌ Not reachable |
+> | SSL inspection | VPN intercepts traffic | ✅ No interception |
+>
+> In your GCP `.env`, leave the proxy lines blank:
+> ```ini
+> HTTPS_PROXY=
+> HTTP_PROXY=
+> VERIFY_SSL=true
+> ```
+
+---
+
+### Which GCP service to use
+
+The app has two constraints that shape the right service:
 
 | Constraint | Why it matters |
 |---|---|
 | **SQLite** | Needs a persistent local filesystem — ephemeral containers lose data on restart |
-| **APScheduler** | Runs inside the Python process — the process must stay alive between requests |
+| **APScheduler** | Runs inside the Python process — must stay alive between requests |
 
-These rule out **Cloud Run** and **App Engine Standard** (both stateless/ephemeral) without significant code changes. The practical options are below, simplest first.
+These rule out **Cloud Run** and **App Engine Standard** without significant code changes. **Compute Engine (VM)** is the recommended path — no code changes required.
 
 ---
 
-### Option 1 — Compute Engine VM ✅ Recommended
+### Step-by-step: Compute Engine VM deployment
 
-A regular Linux VM in Google's cloud. SQLite works, the scheduler runs continuously, and no code changes are required.
-
-**Step 1 — Create the VM:**
+#### Step 1 — Set your GCP project
 
 ```bash
-# e2-micro is free-tier eligible; use e2-small (~$13/month) for daily use
+gcloud config set project YOUR_PROJECT_ID
+```
+
+#### Step 2 — Create the VM
+
+```bash
+# e2-micro = free tier (light use)
+# e2-small = ~$13/month (recommended for daily use)
 gcloud compute instances create oracle-monitor \
   --machine-type=e2-small \
   --image-family=debian-12 \
   --image-project=debian-cloud \
   --boot-disk-size=20GB \
-  --tags=http-server
-
-# Open port 8000 (or 80 if using Nginx in front)
-gcloud compute firewall-rules create allow-oracle-monitor \
-  --allow tcp:8000 \
-  --target-tags http-server
+  --zone=us-central1-a \
+  --tags=oracle-monitor-server
 ```
 
-**Step 2 — SSH in and set up:**
+#### Step 3 — Open the firewall
 
 ```bash
-gcloud compute ssh oracle-monitor
-
-# On the VM:
-sudo apt update && sudo apt install -y python3 python3-pip git
-
-# Copy your code (or clone from git)
-git clone <your-repo-url> /opt/oracle-monitor
-cd /opt/oracle-monitor
-
-pip3 install -r requirements-core.txt
-
-cp .env.example .env
-nano .env          # set API_HOST=0.0.0.0, CRAWL_SCHEDULE=false
+# Allow traffic on port 8000 (direct access, no Nginx)
+gcloud compute firewall-rules create allow-oracle-monitor \
+  --allow=tcp:8000 \
+  --target-tags=oracle-monitor-server \
+  --description="Oracle Monitor web UI"
 ```
 
-**Step 3 — Run headless:**
+#### Step 4 — SSH into the VM
+
+```bash
+gcloud compute ssh oracle-monitor --zone=us-central1-a
+```
+
+All following commands run **inside the VM**.
+
+#### Step 5 — Install Python and Git
+
+```bash
+sudo apt update && sudo apt install -y python3 python3-pip git
+```
+
+#### Step 6 — Copy the app to the VM
+
+**Option A — from Git (recommended):**
+
+```bash
+git clone <your-repo-url> /opt/oracle-monitor
+cd /opt/oracle-monitor
+```
+
+**Option B — upload from your local machine** (run this from your laptop, not the VM):
+
+```bash
+gcloud compute scp --recurse ./Oracle-Update-Monitor oracle-monitor:/opt/ --zone=us-central1-a
+```
+
+#### Step 7 — Install Python dependencies
+
+No proxy needed — pip connects to PyPI directly:
+
+```bash
+cd /opt/oracle-monitor
+pip3 install -r requirements-core.txt
+```
+
+#### Step 8 — Configure `.env`
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Key settings to change for GCP:
+
+```ini
+# ── Required changes for GCP ──────────────────────────
+API_HOST=0.0.0.0          # listen on all interfaces (not just localhost)
+CRAWL_SCHEDULE=false      # use Crawl Now button; or set true for auto
+
+# ── Proxy: leave blank on GCP ─────────────────────────
+HTTPS_PROXY=              # NOT needed on GCP — clear this
+HTTP_PROXY=               # NOT needed on GCP — clear this
+VERIFY_SSL=true
+
+# ── Optional: LLM for AI features ─────────────────────
+LLM_PROVIDER=none         # or anthropic / openai / bedrock / ollama
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Save and exit (`Ctrl+X`, `Y`, `Enter` in nano).
+
+#### Step 9 — Test run
 
 ```bash
 python3 main.py --api-only
 ```
 
-Access: `http://<VM-external-IP>:8000`
+Open a browser and go to:
+```
+http://<VM-EXTERNAL-IP>:8000
+```
 
-**Step 4 — Keep it running after logout (systemd service):**
+Find the external IP with:
+```bash
+gcloud compute instances describe oracle-monitor \
+  --zone=us-central1-a \
+  --format='get(networkInterfaces[0].accessConfigs[0].natIP)'
+```
+
+Press `Ctrl+C` to stop the test run.
+
+#### Step 10 — Run as a background service (survives logout and reboots)
+
+Create a systemd service:
 
 ```bash
 sudo nano /etc/systemd/system/oracle-monitor.service
 ```
+
+Paste this content:
 
 ```ini
 [Unit]
@@ -525,96 +632,48 @@ Environment=PYTHONUNBUFFERED=1
 WantedBy=multi-user.target
 ```
 
+Enable and start:
+
 ```bash
-sudo systemctl enable --now oracle-monitor
+sudo systemctl daemon-reload
+sudo systemctl enable oracle-monitor
+sudo systemctl start oracle-monitor
+```
 
-# Check status
+Verify it is running:
+
+```bash
 sudo systemctl status oracle-monitor
+```
 
-# View live logs
+View live logs:
+
+```bash
 sudo journalctl -u oracle-monitor -f
 ```
 
+The app now starts automatically on every reboot.
+
 ---
 
-### Option 2 — Compute Engine + Docker (cleaner upgrades)
+### Step 11 (optional) — Add Nginx + HTTPS
 
-Same VM as Option 1, but run via Docker so upgrades are just `git pull && docker compose up -d`.
-
-**On the VM:**
+Skip this step if HTTP on port 8000 is acceptable for your team. Add it if you want a clean URL on port 80/443 with SSL.
 
 ```bash
-# Install Docker
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER && newgrp docker
-
-# Deploy
-cd /opt/oracle-monitor
-docker compose up -d
-
-# View logs
-docker compose logs -f
-
-# Upgrade
-git pull && docker compose up -d --build
-```
-
-Uses the `Dockerfile` and `docker-compose.yml` already in the project. The `./data` volume on the VM's persistent disk keeps the database, crawled files, and project instructions across container restarts and rebuilds.
-
----
-
-### Option 3 — Cloud Run (requires code changes)
-
-Cloud Run is serverless — containers spin up per request and shut down on idle. This breaks two things in the current app:
-
-| Problem | Required fix |
-|---|---|
-| SQLite on ephemeral disk | Replace with **Cloud SQL (PostgreSQL)** |
-| APScheduler dies on idle | Replace with **Cloud Scheduler** calling `POST /crawl` on a schedule |
-| `project_context.txt` lost on restart | Store content in DB or **Cloud Storage** |
-
-Estimated effort: **1–2 weeks** of refactoring. Only worth pursuing if you need auto-scaling or zero-maintenance infrastructure.
-
----
-
-### Option 4 — Cloud Run + Cloud SQL (full GCP-native)
-
-The scalable, fully managed architecture for larger teams or future growth:
-
-```
-Cloud Scheduler ──→ Cloud Run (FastAPI/Uvicorn)
-                          │
-                          ├──→ Cloud SQL (PostgreSQL)   ← replaces SQLite
-                          └──→ Cloud Storage             ← replaces data/ folder
-```
-
-**Monthly cost estimate (small team):**
-
-| Service | Est. cost |
-|---|---|
-| Cloud Run (per-request billing) | ~$0–5 |
-| Cloud SQL (db-f1-micro) | ~$10–25 |
-| Cloud Storage (< 1 GB) | < $1 |
-| **Total** | **~$15–30/month** |
-
----
-
-### Adding HTTPS (SSL) on Compute Engine
-
-GCP provides free managed SSL via **Google Cloud Load Balancing**, but for a simple internal tool the easiest approach is **Nginx + Let's Encrypt**:
-
-```bash
-# Install Nginx and Certbot on the VM
 sudo apt install -y nginx certbot python3-certbot-nginx
+```
 
-# Create Nginx config (replace with your domain)
+Create the Nginx site config:
+
+```bash
 sudo nano /etc/nginx/sites-available/oracle-monitor
 ```
 
 ```nginx
 server {
     listen 80;
-    server_name oracle-monitor.your-company.com;
+    server_name YOUR_DOMAIN_OR_IP;
 
     location / {
         proxy_pass         http://127.0.0.1:8000;
@@ -626,32 +685,105 @@ server {
 }
 ```
 
+Enable the site and open port 80:
+
 ```bash
 sudo ln -s /etc/nginx/sites-available/oracle-monitor /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl restart nginx
 
-# Issue a free SSL certificate
-sudo certbot --nginx -d oracle-monitor.your-company.com
+gcloud compute firewall-rules create allow-http \
+  --allow=tcp:80,tcp:443 \
+  --target-tags=oracle-monitor-server
 ```
 
-After certbot runs, the app is available at `https://oracle-monitor.your-company.com`.
+Add a free SSL certificate (requires a public domain name):
 
-> **Internal domain (no public DNS):** Use a self-signed certificate or your corporate CA instead of Let's Encrypt. Let's Encrypt requires a publicly reachable domain for verification.
+```bash
+sudo certbot --nginx -d your-domain.company.com
+```
+
+After certbot completes, the app is available at `https://your-domain.company.com`.
+
+> **No public domain?** Use your VM's external IP directly on port 8000. For a self-signed certificate (internal use), run:
+> ```bash
+> sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+>   -keyout /etc/ssl/private/oracle-monitor.key \
+>   -out /etc/ssl/certs/oracle-monitor.crt
+> ```
+> Then update the Nginx config to reference these files.
 
 ---
 
-### GCP cost summary
+### Step-by-step: Docker deployment on Compute Engine
 
-| Option | Machine | Est. monthly cost | Notes |
+Use this approach if you prefer clean upgrades via `git pull && docker compose up -d`.
+
+After completing Steps 1–4 above (VM created, SSH'd in):
+
+#### Step 5D — Install Docker
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+#### Step 6D — Copy the app (same as Step 6 above)
+
+#### Step 7D — Configure `.env` (same as Step 8 above)
+
+#### Step 8D — Start with Docker Compose
+
+```bash
+cd /opt/oracle-monitor
+docker compose up -d
+```
+
+The `./data` volume persists the database and project instructions across container restarts and rebuilds.
+
+**Useful commands:**
+
+```bash
+docker compose logs -f          # live logs
+docker compose ps               # check running containers
+docker compose restart          # restart without rebuild
+
+# Upgrade to a new version:
+git pull
+docker compose up -d --build
+```
+
+---
+
+### Other GCP options (reference)
+
+| Option | What changes | Effort |
+|---|---|---|
+| **Cloud Run** | SQLite → Cloud SQL; scheduler → Cloud Scheduler; files → Cloud Storage | 1–2 weeks |
+| **Cloud Run + Cloud SQL** | Full serverless, auto-scaling, ~$15–30/month | 1–2 weeks |
+| **App Engine Flexible** | Similar to Cloud Run — same code changes required | 1–2 weeks |
+
+---
+
+### Cost summary
+
+| Machine | vCPU / RAM | Est. monthly | Best for |
 |---|---|---|---|
-| Compute Engine e2-micro | 1 vCPU / 1 GB | **Free** (always-free tier) | Light use only |
-| Compute Engine e2-small | 2 vCPU / 2 GB | **~$13** | Comfortable for daily use |
-| Compute Engine e2-medium | 2 vCPU / 4 GB | **~$27** | If running LLM locally (Ollama) |
+| `e2-micro` | 1 / 1 GB | **Free** (always-free tier) | Occasional use |
+| `e2-small` | 2 / 2 GB | **~$13** | Daily team use |
+| `e2-medium` | 2 / 4 GB | **~$27** | If running Ollama LLM locally |
 | Cloud Run + Cloud SQL | Serverless | **~$15–30** | Requires code changes |
 
-Plus ~$0.80/month per 20 GB persistent disk for VM options.
+Persistent disk: ~$0.80/month per 20 GB (stores database, logs, crawled pages).
 
-> **Tip:** Stop the VM when not in use (`gcloud compute instances stop oracle-monitor`) to avoid charges. Restart with `gcloud compute instances start oracle-monitor`. The disk and all data are preserved.
+> **Save money when not in use:**
+> ```bash
+> # Stop the VM (disk is preserved, no compute charge)
+> gcloud compute instances stop oracle-monitor --zone=us-central1-a
+>
+> # Start it again
+> gcloud compute instances start oracle-monitor --zone=us-central1-a
+> ```
 
 ---
 
