@@ -986,7 +986,7 @@ function renderTree(items){
   });
 
   // ── Build one row ────────────────────────────────────────
-  function makeRow(item,isChild){
+  function makeRow(item,isChild,expandKids=false){
     const imp=item.impact_level;
     const children=(childrenOf[item.title]||[]).filter(c=>visSet.has(c.title));
     const hasKids=children.length>0;
@@ -1029,7 +1029,7 @@ function renderTree(items){
 
     if(hasKids){
       const childBox=el('div','t-children');
-      const autoExpand=!!q||aiMode;   // expand when filtering or in AI mode
+      const autoExpand=expandKids||!!q||aiMode;
       childBox.style.display=autoExpand?'':'none';
       if(!autoExpand) tog.textContent='▸'; else tog.textContent='▾';
 
@@ -1101,8 +1101,8 @@ function renderTree(items){
       verEl.onclick=()=>verBody.style.display=verBody.style.display==='none'?'':'none';
       tree.appendChild(verEl);tree.appendChild(verBody);
       sortItems(its).forEach(item=>{
-        // In version view show category icon as prefix on the label for context
-        const wrap=makeRow(item,false);
+        // In version view: start expanded so all features are visible immediately
+        const wrap=makeRow(item,false,true);
         const lbl=wrap.querySelector('.t-label');
         if(lbl) lbl.textContent=(CI[item.category]||'')+' '+lbl.textContent;
         verBody.appendChild(wrap);
