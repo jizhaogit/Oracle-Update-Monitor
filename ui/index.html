@@ -776,9 +776,10 @@ async function api(path,opts={}){
 async function loadAll(){
   setStatus('Loading…');
   try{
-    const [updates,stats,svcs]=await Promise.all([
+    const [updates,stats,cats,svcs]=await Promise.all([
       api('/updates?limit=5000'),
       api('/stats'),
+      api('/categories'),
       api('/services'),
     ]);
     ALL=updates;
@@ -791,14 +792,19 @@ async function loadAll(){
     });
     _lastCrawlRun=stats.last_run;
 
-    // ── Populate Module dropdown from live DB services ───────────────────
+    // ── Populate Module dropdown ─────────────────────────────────────────
+    // Non-HCM categories first (e.g. OIC), then HCM module services.
+    // Selecting a category filters by u.category; selecting a service
+    // filters by u.service — getFiltered() handles both cases.
     const modSel=$('f-mod');
     const prevMod=modSel.value;
     modSel.innerHTML='<option value="">All</option>';
-    svcs.forEach(s=>{
+    const nonHcmCats=cats.filter(c=>c!=='HCM');
+    const combined=[...nonHcmCats, ...svcs.filter(s=>!nonHcmCats.includes(s))];
+    combined.forEach(entry=>{
       const o=document.createElement('option');
-      o.value=s; o.textContent=s;
-      if(s===prevMod) o.selected=true;
+      o.value=entry; o.textContent=entry;
+      if(entry===prevMod) o.selected=true;
       modSel.appendChild(o);
     });
 
@@ -823,10 +829,9 @@ function getFiltered(){
   const mod=$('f-mod').value, imp=$('f-imp').value, flg=$('f-flag').value, ver=$('f-ver').value;
   const base=_aiSearchResults!==null?_aiSearchResults:ALL;
   return base.filter(u=>{
-    // Module filter: match on service field (the HCM module name).
-    // For child records whose service matches the parent's module, always include them
-    // when the parent's service matches — handled by checking u.service directly.
-    if(mod&&u.service!==mod)return false;
+    // Module filter: for non-HCM category values (e.g. "OIC") match on category;
+    // for HCM module names (e.g. "Compensation") match on service.
+    if(mod&&u.category!==mod&&u.service!==mod)return false;
     if(imp&&u.impact_level!==imp)return false;
     if(flg==='flagged'&&!u.is_flagged)return false;
     if(ver&&u.release_code!==ver)return false;
