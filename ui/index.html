@@ -529,7 +529,7 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
   <div class="vsep"></div>
   <button class="btn btn-sec" onclick="loadAll()">↺ Refresh</button>
   <button class="btn btn-sec" onclick="markSeen()" title="Mark Seen">✓</button>
-  <button class="btn btn-sec" onclick="purgeNonHcm()" title="Remove legacy OCI/OIC sample records" style="color:var(--telus-crimson);border-color:var(--telus-crimson)">🗑 Clean Legacy</button>
+  <!-- Clean Legacy button hidden — call purgeNonHcm() from browser console if needed -->
   <button class="btn" onclick="triggerCrawl()">▶ Crawl Now</button>
   <div class="vsep"></div>
   <!-- Conclusion button with selected-count badge -->
