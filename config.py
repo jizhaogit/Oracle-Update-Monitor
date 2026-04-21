@@ -51,13 +51,7 @@ _DEFAULT_SOURCES_INI = """\
 # Lines starting with # are comments and are ignored.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── HCM ──────────────────────────────────────────────────────────────────────
-
-[HCM — REST API Usage]
-url      = https://docs.oracle.com/en/cloud/saas/human-resources/index.html
-category = HCM
-service  = REST API Usage
-type     = reference
+# ── HCM Readiness (hub crawls all keyword-filtered modules automatically) ────
 
 [HCM — What's New]
 url      = https://docs.oracle.com/en/cloud/saas/readiness/hcm.html
@@ -65,69 +59,15 @@ category = HCM
 service  = Human Capital Management
 type     = whats_new
 
-[HCM — REST API Endpoints]
-url      = https://docs.oracle.com/en/cloud/saas/human-resources/farws/rest-endpoints.html
+# ── Common Technologies & User Experience Readiness ───────────────────────────
+
+[Common Technologies — What's New]
+url      = https://docs.oracle.com/en/cloud/saas/readiness/common.html
 category = HCM
-service  = REST API
-type     = release_notes
-
-# ── OCI ──────────────────────────────────────────────────────────────────────
-
-[OCI — What's New]
-url      = https://docs.oracle.com/en-us/iaas/Content/servicechanges.htm
-category = OCI
-service  = General
+service  = Common Technologies and User Experience
 type     = whats_new
 
-[OCI — Release Notes (All)]
-url      = https://docs.oracle.com/en-us/iaas/releasenotes/
-category = OCI
-service  = General
-type     = release_notes
-
-[OCI — Compute]
-url      = https://docs.oracle.com/en-us/iaas/releasenotes/changes/compute/
-category = OCI
-service  = Compute
-type     = release_notes
-
-[OCI — Networking]
-url      = https://docs.oracle.com/en-us/iaas/releasenotes/changes/network/
-category = OCI
-service  = Networking
-type     = release_notes
-
-[OCI — Database]
-url      = https://docs.oracle.com/en-us/iaas/releasenotes/changes/database/
-category = OCI
-service  = Database
-type     = release_notes
-
-[OCI — Storage]
-url      = https://docs.oracle.com/en-us/iaas/releasenotes/changes/storage/
-category = OCI
-service  = Storage
-type     = release_notes
-
-[OCI — Security]
-url      = https://docs.oracle.com/en-us/iaas/releasenotes/changes/security/
-category = OCI
-service  = Security
-type     = release_notes
-
-[OCI — Analytics]
-url      = https://docs.oracle.com/en-us/iaas/releasenotes/changes/analytics/
-category = OCI
-service  = Analytics
-type     = release_notes
-
-[OCI — Containers & Kubernetes]
-url      = https://docs.oracle.com/en-us/iaas/releasenotes/changes/containers/
-category = OCI
-service  = Containers
-type     = release_notes
-
-# ── OIC ──────────────────────────────────────────────────────────────────────
+# ── OIC (Oracle Integration Cloud) ───────────────────────────────────────────
 
 [OIC — What's New]
 url      = https://docs.oracle.com/en/cloud/paas/integration-cloud/whats-new/
@@ -145,10 +85,10 @@ type     = release_notes
 # Example:
 #
 # [My Custom Source]
-# url      = https://docs.oracle.com/en/cloud/paas/...
-# category = OIC
+# url      = https://docs.oracle.com/en/cloud/saas/readiness/hcm.html
+# category = HCM
 # service  = My Service
-# type     = release_notes
+# type     = whats_new
 """
 
 
@@ -204,37 +144,43 @@ IMPACT_KEYWORDS: dict[str, list[str]] = {
 
 # Tag extraction keyword → tag
 TAG_KEYWORDS: dict[str, str] = {
-    "compute":      "Compute",
-    "instance":     "Compute",
-    "networking":   "Networking",
-    "vcn":          "Networking",
-    "subnet":       "Networking",
-    "database":     "Database",
-    "autonomous":   "Database",
-    "storage":      "Storage",
-    "object storage": "Storage",
-    "block volume": "Storage",
-    "security":     "Security",
-    "iam":          "IAM",
-    "policy":       "IAM",
-    "kubernetes":   "Kubernetes",
-    "container":    "Containers",
-    "analytics":    "Analytics",
-    "integration":  "Integration",
-    "api":          "API",
-    "sdk":          "SDK",
-    "cli":          "CLI",
-    "terraform":    "Terraform",
-    "monitoring":   "Monitoring",
-    "logging":      "Logging",
-    "notification": "Notifications",
-    "ai":           "AI/ML",
-    "machine learning": "AI/ML",
-    "generative":   "GenAI",
-    # UI / new-experience tags — used to show the 🖥 icon in the UI
-    "redwood":          "Redwood UI",
-    "new experience":   "Redwood UI",
-    "user interface":   "Redwood UI",
+    # ── HCM modules ──────────────────────────────────────────────────────────
+    "human resources":              "Human Resources",
+    "global human resources":       "Human Resources",
+    "workforce":                    "Human Resources",
+    "recruiting":                   "Recruiting",
+    "talent acquisition":           "Recruiting",
+    "opportunity marketplace":      "Opportunity Marketplace",
+    "internal mobility":            "Opportunity Marketplace",
+    "talent management":            "Talent Management",
+    "performance":                  "Talent Management",
+    "succession":                   "Talent Management",
+    "compensation":                 "Compensation",
+    "total compensation":           "Compensation",
+    "salary":                       "Compensation",
+    "hcm common":                   "HCM Common",
+    "absence":                      "Absence Management",
+    "time and labor":               "Time & Labor",
+    "payroll":                      "Payroll",
+    "benefits":                     "Benefits",
+    "learning":                     "Learning",
+    "dynamic skills":               "Skills",
+    "skills":                       "Skills",
+    # ── Cross-cutting ─────────────────────────────────────────────────────────
+    "security":                     "Security",
+    "api":                          "API",
+    "rest api":                     "API",
+    "analytics":                    "Analytics",
+    "ai":                           "AI/ML",
+    "machine learning":             "AI/ML",
+    "generative":                   "GenAI",
+    "agentic":                      "GenAI",
+    # ── UI / new-experience tags ──────────────────────────────────────────────
+    "redwood":                      "Redwood UI",
+    "new experience":               "Redwood UI",
+    "user interface":               "Redwood UI",
+    "common technologies":          "Common Technologies",
+    "user experience":              "Common Technologies",
 }
 
 # ── LLM / AI settings ──────────────────────────────────────────────────────────
@@ -301,6 +247,27 @@ HCM_EXTRA_RELEASES: list[str] = [
     r.strip().upper()
     for r in os.getenv("HCM_EXTRA_RELEASES", "26A").split(",")
     if r.strip()
+]
+
+# HCM module keyword filter — only crawl readiness modules whose title contains
+# at least one of these keywords (case-insensitive substring match).
+# Covers both the HCM hub (hcm.html) and Fusion Common hub (common.html).
+# Leave blank (HCM_MODULE_KEYWORDS=) to crawl ALL modules from every hub.
+# Comma-separated, e.g.  HCM_MODULE_KEYWORDS=Compensation,Recruiting
+HCM_MODULE_KEYWORDS: list[str] = [
+    k.strip()
+    for k in os.getenv(
+        "HCM_MODULE_KEYWORDS",
+        "Human Resources,"
+        "Human Capital Management,"
+        "Recruiting,"
+        "Opportunity Marketplace,"
+        "Talent Management,"
+        "Compensation,"
+        "HCM Common,"
+        "Common Technologies",
+    ).split(",")
+    if k.strip()
 ]
 
 # Corporate proxy support — set these in .env when running behind a VPN.

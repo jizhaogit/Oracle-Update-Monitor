@@ -477,55 +477,115 @@ def _try_hcm_readiness(soup: BeautifulSoup) -> list[dict]:
     return items
 
 
-def parse_hcm_hub_modules(html: str) -> list[dict]:
+def parse_readiness_hub_modules(html: str, path_prefix: str = "hcm") -> list[dict]:
     """
-    Extract the HCM module list from the embedded JSON inside hcm.html.
+    Extract the module list from an Oracle Fusion readiness hub page.
 
-    hcm.html is fully JS-rendered but the server inlines a JavaScript variable
-    that contains a JSON-like array of all module entries, e.g.:
+    Works for both hcm.html (path_prefix="hcm") and common.html
+    (path_prefix="common").  The server inlines a JavaScript variable
+    containing a JSON-like array of module entries, e.g.:
         {"title": "Payroll What's New 26B", "html": "hcm/26b/payr-26b/index.html", "position": 23}
+        {"title": "Common Technologies ... 26B", "html": "common/26b/common26b/index.html", "position": 1}
 
     Returns a list of {"title": ..., "path": ...} dicts.
+
+    Two-method approach:
+      1. BeautifulSoup <script> tag enumeration (fast, precise).
+      2. Raw HTML regex fallback — catches cases where script.string is None
+         (happens with some BeautifulSoup / lxml versions when the script
+         content is large, or when a corporate proxy modifies the response).
     """
     import json as _json
 
     if not html:
         return []
 
-    soup = BeautifulSoup(html, "lxml")
+    key = f'"{path_prefix}/'
+
+    # Diagnostic — always log so proxy/encoding issues show up in the log file
+    key_present = key in html
+    log.info(
+        "Hub parse (%s): received %d bytes — key '%s' present=%s",
+        path_prefix, len(html), key, key_present,
+    )
+    if not key_present:
+        log.warning(
+            "Key '%s' not found anywhere in the %s hub HTML (%d bytes). "
+            "The proxy may be stripping <script> content, or the page "
+            "structure has changed.  First 300 chars: %s",
+            key, path_prefix, len(html), html[:300].replace("\n", " "),
+        )
+        return []
+
+    # Each module object looks like: {"title":"...","html":"PREFIX/...","position":N}
+    pattern = (
+        r'\{[^{}]*?"html"\s*:\s*"('
+        + re.escape(path_prefix)
+        + r'/[^"]+\.html)"[^{}]*?\}'
+    )
+
     modules: list[dict] = []
     seen: set[str]      = set()
 
-    for script in soup.find_all("script"):
-        text = script.string or ""
-        if '"hcm/' not in text:
-            continue
-
-        # Each module object looks like: {"title":"...","html":"hcm/...","position":N}
-        # They may be nested in a larger array or JS assignment.
-        for m in re.finditer(
-            r'\{[^{}]*?"html"\s*:\s*"(hcm/[^"]+\.html)"[^{}]*?\}',
-            text,
-            re.DOTALL,
-        ):
+    def _extract_from_text(text: str) -> None:
+        for m in re.finditer(pattern, text, re.DOTALL):
             obj_str = m.group(0)
             path    = m.group(1)
             if path in seen:
                 continue
-            # Try proper JSON parse first
             try:
                 entry = _json.loads(obj_str)
                 title = entry.get("title", "")
             except _json.JSONDecodeError:
                 title_m = re.search(r'"title"\s*:\s*"([^"]+)"', obj_str)
                 title   = title_m.group(1) if title_m else ""
-
             if title and path:
                 seen.add(path)
                 modules.append({"title": title, "path": path})
 
-    log.info("HCM hub: found %d modules", len(modules))
+    # ── Method 1: BeautifulSoup <script> tags ─────────────────────────────
+    soup = BeautifulSoup(html, "lxml")
+    scripts_checked = 0
+    scripts_matched = 0
+    for script in soup.find_all("script"):
+        # Use script.string first; fall back to get_text() in case string is None
+        text = script.string or script.get_text() or ""
+        scripts_checked += 1
+        if key not in text:
+            continue
+        scripts_matched += 1
+        _extract_from_text(text)
+
+    log.info(
+        "Hub parse Method 1 (script tags): %d scripts checked, %d matched key, %d modules",
+        scripts_checked, scripts_matched, len(modules),
+    )
+
+    # ── Method 2: Raw HTML regex fallback ─────────────────────────────────
+    # Triggered when BS4 found 0 modules but the key IS in the raw HTML.
+    # This catches cases where the script tag's .string property returned None
+    # (e.g. some proxy responses wrap content in CDATA or add attributes that
+    # confuse the HTML parser, causing BS4 to miss the text content).
+    if not modules:
+        log.info(
+            "Hub parse Method 2: BeautifulSoup found 0 modules — "
+            "trying raw HTML regex fallback …"
+        )
+        _extract_from_text(html)
+        log.info("Hub parse Method 2 (raw regex): %d modules found", len(modules))
+
+    log.info("Readiness hub (%s): %d modules total", path_prefix, len(modules))
     return modules
+
+
+def parse_hcm_hub_modules(html: str) -> list[dict]:
+    """Extract HCM module list from hcm.html. Wrapper for parse_readiness_hub_modules."""
+    return parse_readiness_hub_modules(html, path_prefix="hcm")
+
+
+def parse_common_hub_modules(html: str) -> list[dict]:
+    """Extract Common Technologies module list from common.html."""
+    return parse_readiness_hub_modules(html, path_prefix="common")
 
 
 def parse_hcm_toc(html: str, toc_url: str) -> list[str]:
