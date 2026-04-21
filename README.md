@@ -459,14 +459,14 @@ nssm start OracleMonitor
 
 > **No proxy configuration is needed on GCP.**
 >
-> The Telus VPN proxy (`pac.tsl.telus.com`) is only required when running on a machine inside the Telus corporate network. A GCP VM sits directly on the public internet and can reach PyPI, Oracle docs, and all other external URLs without any proxy.
+> Your corporate VPN proxy is only required when running on a machine inside your company network. A GCP VM sits directly on the public internet and can reach PyPI, Oracle docs, and all other external URLs without any proxy.
 >
-> | | Your Telus laptop | GCP VM |
+> | | Corporate laptop (on VPN) | GCP VM |
 > |---|---|---|
 > | PyPI (`pypi.org`) | Needs proxy | ✅ Direct access |
 > | Oracle docs (`docs.oracle.com`) | Needs proxy | ✅ Direct access |
-> | `pac.tsl.telus.com` | ✅ Reachable (Telus internal) | ❌ Not reachable |
-> | SSL inspection | VPN intercepts traffic | ✅ No interception |
+> | Corporate PAC server | ✅ Reachable (internal only) | ❌ Not reachable |
+> | SSL inspection | VPN may intercept traffic | ✅ No interception |
 >
 > In your GCP `.env`, leave the proxy lines blank:
 > ```ini
@@ -1021,8 +1021,8 @@ Inside the Conclusion modal, **🧠 Analyze Impact & Upgrade Guide** runs an AI 
 
 When the selected item has a **Jira ticket URL in its flag note**, the Analyze workflow automatically fetches the ticket and feeds its content to the LLM — ticket key, summary, status, priority, description, and last 5 comments.
 
-- A blue `🎫 Jira context loaded: BGCO-4817` badge appears when the fetch succeeded.
-- A red `⚠ BGCO-4817: <error>` badge appears if it failed.
+- A blue `🎫 Jira context loaded: PROJ-1234` badge appears when the fetch succeeded.
+- A red `⚠ PROJ-1234: <error>` badge appears if it failed.
 - Click **🎫 Test Jira** in the Flag panel to verify connectivity without running the full analysis.
 
 ### Project Instructions
@@ -1161,7 +1161,7 @@ curl -X POST http://127.0.0.1:8000/reclassify-all
 curl http://127.0.0.1:8000/reclassify-status
 
 # Test Jira connectivity
-curl "http://127.0.0.1:8000/jira-test?url=https://jira.tssi.ca/browse/BGCO-4817"
+curl "http://127.0.0.1:8000/jira-test?url=https://jira.your-company.com/browse/PROJ-1234"
 ```
 
 ---
