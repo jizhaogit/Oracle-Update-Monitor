@@ -993,7 +993,7 @@ function renderTree(items){
 
     const label=isChild
       ? item.title.slice((parentOf[item.title]||'').length+3)  // strip "Parent — "
-      : item.title;
+      : item.title.replace(/^HCM\s*\u2014\s*/,'');             // strip leading "HCM — "
 
     const cls='t-item'+(item.is_new?' isnew':'')+
       (imp==='High'?' hi':imp==='Medium'?' me':imp==='Low'?' lo':'')+
@@ -1103,8 +1103,6 @@ function renderTree(items){
       sortItems(its).forEach(item=>{
         // In version view: start expanded so all features are visible immediately
         const wrap=makeRow(item,false,true);
-        const lbl=wrap.querySelector('.t-label');
-        if(lbl) lbl.textContent=(CI[item.category]||'')+' '+lbl.textContent;
         verBody.appendChild(wrap);
       });
     });
