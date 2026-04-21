@@ -246,6 +246,29 @@ label{font-size:0.87rem;color:var(--text-dim)}
 .btn-comment{background:var(--telus-accessible-green);color:#fff;border:none;
   padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85rem;font-weight:500}
 .btn-comment:hover{background:var(--telus-accessible-green-dark)}
+/* PSA / TES tracking panel */
+#d-psa-panel{margin:10px 0 16px;background:#EEF4FF;
+  border:1px solid #93C5FD;border-radius:6px;padding:14px 16px}
+#d-psa-panel .fp-title{font-size:0.82rem;font-weight:700;color:#1d4ed8;
+  letter-spacing:.05em;text-transform:uppercase;margin-bottom:12px}
+.psa-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;margin-bottom:10px}
+.psa-full{grid-column:1/-1}
+.psa-field{display:flex;flex-direction:column;gap:3px}
+.psa-field label{font-size:0.75rem;font-weight:600;color:var(--text-dim);letter-spacing:.3px}
+.psa-field input,.psa-field select,.psa-field textarea{
+  width:100%;box-sizing:border-box;border:1px solid var(--telus-mystic);border-radius:4px;
+  padding:6px 9px;font-size:0.85rem;background:var(--telus-white);
+  color:var(--telus-charcoal);font-family:inherit}
+.psa-field textarea{resize:vertical;min-height:58px}
+.psa-field input:focus,.psa-field select:focus,.psa-field textarea:focus{
+  outline:none;border-color:#3b82f6}
+.btn-psa{background:#1d4ed8;color:#fff;border:none;padding:6px 14px;
+  border-radius:4px;cursor:pointer;font-size:0.85rem;font-weight:500}
+.btn-psa:hover{background:#1e40af}
+body.night #d-psa-panel{background:#1e2a40;border-color:#3b5998}
+body.night #d-psa-panel .fp-title{color:#93c5fd}
+body.night .psa-field input,body.night .psa-field select,body.night .psa-field textarea{
+  background:#2d3a50;border-color:#3b5998;color:#e8eaf6}
 .b-ver{background:var(--telus-purple);color:#fff;cursor:pointer}
 .b-ver:hover{background:var(--telus-purple-dark)}
 #dbody{flex:1;overflow-y:auto;padding:0 22px 22px}
@@ -649,6 +672,52 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
             <div class="fp-row">
               <button class="btn-comment" onclick="saveComment()">💾 Save Note</button>
               <span class="fp-saved" id="cmt-saved" style="display:none">✓ Saved</span>
+            </div>
+          </div>
+          <!-- PSA / TES project tracking panel -->
+          <div id="d-psa-panel">
+            <div class="fp-title">📋 PSA / TES Project Tracking</div>
+            <div class="psa-grid">
+              <div class="psa-field">
+                <label>TES Owner</label>
+                <input type="text" id="psa-tes-owner" placeholder="Name or email">
+              </div>
+              <div class="psa-field">
+                <label>PSA Owner</label>
+                <input type="text" id="psa-psa-owner" placeholder="Name or email">
+              </div>
+              <div class="psa-field">
+                <label>Function Category</label>
+                <input type="text" id="psa-function-cat" placeholder="e.g. Compensation">
+              </div>
+              <div class="psa-field">
+                <label>TES Status</label>
+                <select id="psa-tes-status">
+                  <option value="">— Select —</option>
+                  <option value="Not Started">Not Started</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="To Review">To Review</option>
+                  <option value="Complete">Complete</option>
+                  <option value="On Hold">On Hold</option>
+                  <option value="N/A">N/A</option>
+                </select>
+              </div>
+              <div class="psa-field psa-full">
+                <label>Next Action Required for PSA Project</label>
+                <textarea id="psa-next-action" placeholder="Describe the next steps…"></textarea>
+              </div>
+              <div class="psa-field psa-full">
+                <label>Profile Options Already On</label>
+                <textarea id="psa-profile-opts" placeholder="List relevant profile options…"></textarea>
+              </div>
+              <div class="psa-field psa-full">
+                <label>PSA Comments</label>
+                <textarea id="psa-comments-text" placeholder="Additional comments…"></textarea>
+              </div>
+            </div>
+            <div class="fp-row">
+              <button class="btn-psa" onclick="savePsaFields()">💾 Save PSA / TES Fields</button>
+              <span class="fp-saved" id="psa-saved" style="display:none">✓ Saved</span>
             </div>
           </div>
         </div>
@@ -1337,6 +1406,15 @@ function showDetail(item){
   // Comment panel
   $('d-comment-text').value=item.user_comment||'';
   $('cmt-saved').style.display='none';
+  // PSA / TES tracking panel
+  $('psa-tes-owner').value=item.tes_owner||'';
+  $('psa-psa-owner').value=item.psa_owner||'';
+  $('psa-function-cat').value=item.function_category||'';
+  $('psa-tes-status').value=item.tes_status||'';
+  $('psa-next-action').value=item.next_action||'';
+  $('psa-profile-opts').value=item.profile_options||'';
+  $('psa-comments-text').value=item.psa_comments||'';
+  $('psa-saved').style.display='none';
   // Flag panel state
   $('d-flag-note').value=item.flag_note||'';
   $('fp-saved').style.display='none';
@@ -1590,7 +1668,13 @@ function exportStatsCSV(){
   const items=getFiltered();
   const ver=$('f-ver').value;
   const title=ver?`Oracle Update Report ${ver}`:'Oracle Update Report';
-  const cols=['Topic','Category','Version','Impact Level','Auto','Jira Link','Customize Note'];
+  const cols=[
+    'Topic','Category','Version','Impact Level','Auto',
+    'Jira Link','Customize Note',
+    'TES Owner','PSA Owner','Function Category','TES Status',
+    'Next Action Required for PSA Project',
+    'Profile Options Already On','PSA Comments',
+  ];
   const esc=v=>{
     const s=String(v==null?'':v).replace(/"/g,'""');
     return /[",\n\r]/.test(s)?`"${s}"`:s;
@@ -1604,7 +1688,14 @@ function exportStatsCSV(){
       u.impact_level||'',
       isAutoEnabled(u)?'Auto':'N/A',
       u.flag_note||'',
-      u.user_comment||''
+      u.user_comment||'',
+      u.tes_owner||'',
+      u.psa_owner||'',
+      u.function_category||'',
+      u.tes_status||'',
+      u.next_action||'',
+      u.profile_options||'',
+      u.psa_comments||'',
     ].map(esc).join(','));
   });
   const blob=new Blob(['\uFEFF'+rows.join('\r\n')],{type:'text/csv;charset=utf-8;'});
@@ -1683,6 +1774,32 @@ async function saveComment(){
     const saved=$('cmt-saved');saved.style.display='';
     setTimeout(()=>saved.style.display='none',2500);
   }catch(e){setStatus('Comment error: '+e.message)}
+}
+
+/* ── PSA / TES fields ──────────────────────────────────── */
+async function savePsaFields(){
+  if(!_currentFlagId)return;
+  const fields={
+    tes_owner:        $('psa-tes-owner').value.trim(),
+    psa_owner:        $('psa-psa-owner').value.trim(),
+    function_category:$('psa-function-cat').value.trim(),
+    tes_status:       $('psa-tes-status').value,
+    next_action:      $('psa-next-action').value.trim(),
+    profile_options:  $('psa-profile-opts').value.trim(),
+    psa_comments:     $('psa-comments-text').value.trim(),
+  };
+  try{
+    const rec=await api(`/updates/${_currentFlagId}/psa-fields`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(fields),
+    });
+    // Sync into in-memory cache so export picks up latest values
+    const idx=ALL.findIndex(u=>u.id===_currentFlagId);
+    if(idx>=0) Object.assign(ALL[idx],fields);
+    const s=$('psa-saved');s.style.display='';
+    setTimeout(()=>s.style.display='none',2500);
+  }catch(e){setStatus('PSA save error: '+e.message);}
 }
 
 /* ── Jira test helper ──────────────────────────────────── */

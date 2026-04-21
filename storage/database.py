@@ -54,6 +54,14 @@ def init_db() -> None:
     # Columns added in v6 (user overrides — survive crawl refreshes)
     _add_column_if_missing("oracle_updates", "impact_overridden", "BOOLEAN DEFAULT 0")
     _add_column_if_missing("oracle_updates", "user_comment",      "TEXT")
+    # Columns added in v7 (PSA / TES project tracking fields)
+    _add_column_if_missing("oracle_updates", "tes_owner",         "VARCHAR(200)")
+    _add_column_if_missing("oracle_updates", "psa_owner",         "VARCHAR(200)")
+    _add_column_if_missing("oracle_updates", "function_category", "VARCHAR(200)")
+    _add_column_if_missing("oracle_updates", "next_action",       "TEXT")
+    _add_column_if_missing("oracle_updates", "profile_options",   "TEXT")
+    _add_column_if_missing("oracle_updates", "psa_comments",      "TEXT")
+    _add_column_if_missing("oracle_updates", "tes_status",        "VARCHAR(100)")
 
     # Data migration v5 — re-classify UI/Redwood records Low → Medium
     _backfill_ui_impact()
@@ -601,6 +609,31 @@ def set_comment(update_id: int, comment: str) -> Optional[dict]:
         if rec is None:
             return None
         rec.user_comment = comment.strip()
+    with session_scope() as s:
+        rec = s.query(OracleUpdate).filter(OracleUpdate.id == update_id).first()
+        return rec.to_dict() if rec else None
+
+
+def set_psa_fields(update_id: int, fields: dict) -> Optional[dict]:
+    """
+    Save PSA / TES project tracking fields on an update record.
+    Only the keys present in *fields* are updated; omitted keys are left as-is.
+
+    Accepted keys (all optional):
+        tes_owner, psa_owner, function_category,
+        next_action, profile_options, psa_comments, tes_status
+    """
+    _allowed = {
+        "tes_owner", "psa_owner", "function_category",
+        "next_action", "profile_options", "psa_comments", "tes_status",
+    }
+    with session_scope() as s:
+        rec = s.query(OracleUpdate).filter(OracleUpdate.id == update_id).first()
+        if rec is None:
+            return None
+        for key, val in fields.items():
+            if key in _allowed:
+                setattr(rec, key, val if val else None)
     with session_scope() as s:
         rec = s.query(OracleUpdate).filter(OracleUpdate.id == update_id).first()
         return rec.to_dict() if rec else None

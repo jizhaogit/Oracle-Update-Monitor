@@ -36,7 +36,7 @@ from storage.database import (
     get_analysis_cache, save_analysis_cache,
     get_stats, get_update, get_updates_by_ids, get_versions,
     list_crawl_runs, list_updates, multi_keyword_search,
-    set_comment, set_flag, set_impact, update_classification,
+    set_comment, set_flag, set_impact, set_psa_fields, update_classification,
     get_distinct_categories, get_distinct_services, mark_all_seen,
     delete_by_category, delete_legacy_records,
 )
@@ -89,6 +89,15 @@ class CommentRequest(BaseModel):
 
 class AISearchRequest(BaseModel):
     query: str
+
+class PSAFieldsRequest(BaseModel):
+    tes_owner:         Optional[str] = ""
+    psa_owner:         Optional[str] = ""
+    function_category: Optional[str] = ""
+    next_action:       Optional[str] = ""
+    profile_options:   Optional[str] = ""
+    psa_comments:      Optional[str] = ""
+    tes_status:        Optional[str] = ""
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -162,6 +171,18 @@ def override_impact(update_id: int, body: ImpactRequest):
 def save_comment(update_id: int, body: CommentRequest):
     """Save (or clear) a free-text user comment on a single update."""
     rec = set_comment(update_id, body.comment)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Update not found")
+    return rec
+
+
+@app.post("/updates/{update_id}/psa-fields")
+def save_psa_fields(update_id: int, body: PSAFieldsRequest):
+    """
+    Save PSA / TES project tracking fields for a single update.
+    All fields are optional — omit or pass empty string to clear.
+    """
+    rec = set_psa_fields(update_id, body.model_dump())
     if rec is None:
         raise HTTPException(status_code=404, detail="Update not found")
     return rec
