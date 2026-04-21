@@ -12,28 +12,30 @@ An intelligent, self-contained tool for tracking Oracle Cloud Infrastructure (OC
 4. [How Topics and Impact Levels Work](#how-topics-and-impact-levels-work)
 5. [Architecture Overview](#architecture-overview)
 6. [Quick Start](#quick-start)
-7. [Configuration](#configuration)
-8. [Using the UI](#using-the-ui)
-   - [Toolbar](#toolbar)
-   - [Sidebar](#sidebar)
-   - [Detail View](#detail-view)
-   - [Override Impact Level](#override-impact-level)
-   - [Flag for Review](#flag-for-review)
-   - [My Notes](#my-notes)
-   - [PSA / TES Project Tracking](#psa--tes-project-tracking)
-   - [All Updates Tab](#all-updates-tab)
-   - [Statistics Tab & Export](#statistics-tab--export)
-   - [Conclusion (Comparison) Modal](#conclusion-comparison-modal)
-   - [AI Impact Analysis](#ai-impact-analysis)
-   - [Jira-Aware Analysis](#jira-aware-analysis)
-   - [Project Instructions](#project-instructions)
-   - [Appearance Settings](#appearance-settings)
-9. [User Customisations Survive Crawls](#user-customisations-survive-crawls)
-10. [REST API Reference](#rest-api-reference)
-11. [Command-Line Options](#command-line-options)
-12. [Project Structure](#project-structure)
-13. [Dependencies](#dependencies)
-14. [Troubleshooting](#troubleshooting)
+7. [Running as a Web App (Server Mode)](#running-as-a-web-app-server-mode)
+8. [Deploying on Google Cloud Platform (GCP)](#deploying-on-google-cloud-platform-gcp)
+9. [Configuration](#configuration)
+10. [Using the UI](#using-the-ui)
+    - [Toolbar](#toolbar)
+    - [Sidebar](#sidebar)
+    - [Detail View](#detail-view)
+    - [Override Impact Level](#override-impact-level)
+    - [Flag for Review](#flag-for-review)
+    - [My Notes](#my-notes)
+    - [PSA / TES Project Tracking](#psa--tes-project-tracking)
+    - [All Updates Tab](#all-updates-tab)
+    - [Statistics Tab & Export](#statistics-tab--export)
+    - [Conclusion (Comparison) Modal](#conclusion-comparison-modal)
+    - [AI Impact Analysis](#ai-impact-analysis)
+    - [Jira-Aware Analysis](#jira-aware-analysis)
+    - [Project Instructions](#project-instructions)
+    - [Appearance Settings](#appearance-settings)
+11. [User Customisations Survive Crawls](#user-customisations-survive-crawls)
+12. [REST API Reference](#rest-api-reference)
+13. [Command-Line Options](#command-line-options)
+14. [Project Structure](#project-structure)
+15. [Dependencies](#dependencies)
+16. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -227,6 +229,429 @@ cd <project-folder>
 python -m pip install -r requirements-core.txt
 python main.py
 ```
+
+---
+
+## Running as a Web App (Server Mode)
+
+The backend is FastAPI + Uvicorn — a production-grade web server that runs entirely in Python. No Apache, Nginx, or IIS is *required*, though any of them can be placed in front as a reverse proxy.
+
+---
+
+### Option 1 — Uvicorn direct (simplest, internal team)
+
+This is the easiest path. The app binds directly to a port and teammates access it over the network.
+
+**Step 1 — Change the bind address in `.env`:**
+
+```ini
+API_HOST=0.0.0.0      # listen on all network interfaces, not just localhost
+API_PORT=8000
+```
+
+**Step 2 — Start in headless mode (no browser auto-open):**
+
+```bat
+runtime\python.exe main.py --api-only
+```
+
+Or with system Python:
+
+```bash
+python main.py --api-only
+```
+
+**Step 3 — Teammates open their browser to:**
+
+```
+http://<your-machine-name-or-ip>:8000
+```
+
+That's it. No other software needed. Works well for a small team (5–15 people) accessing over VPN or LAN.
+
+---
+
+### Option 2 — Nginx reverse proxy (recommended for production)
+
+Nginx sits in front of Uvicorn and handles SSL, compression, and port 80/443. Uvicorn stays on an internal port.
+
+**1. Install Nginx** (Linux):
+
+```bash
+sudo apt install nginx        # Ubuntu/Debian
+sudo yum install nginx        # RHEL/CentOS
+```
+
+**2. Create a site config** (`/etc/nginx/sites-available/oracle-monitor`):
+
+```nginx
+server {
+    listen 80;
+    server_name your-server-name.company.com;
+
+    location / {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 120s;
+    }
+}
+```
+
+**3. Enable and restart:**
+
+```bash
+sudo ln -s /etc/nginx/sites-available/oracle-monitor /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl restart nginx
+```
+
+**4. Start the app** (keep `.env` with `API_HOST=127.0.0.1` — Nginx handles the public side):
+
+```bash
+python main.py --api-only
+```
+
+Teammates access: `http://your-server-name.company.com`
+
+To add HTTPS, use **Let's Encrypt** (`certbot --nginx`) or install your corporate SSL certificate.
+
+---
+
+### Option 3 — IIS reverse proxy (Windows corporate server)
+
+IIS can proxy to Uvicorn using the **Application Request Routing (ARR)** module.
+
+**Prerequisites:**
+- IIS installed (Windows Server)
+- [ARR module](https://www.iis.net/downloads/microsoft/application-request-routing) installed
+- URL Rewrite module installed
+
+**Steps:**
+
+1. Start the app on the server:
+   ```bat
+   runtime\python.exe main.py --api-only
+   ```
+
+2. In IIS Manager → select your site → **URL Rewrite** → Add Rule → **Reverse Proxy**:
+   - Server name: `127.0.0.1:8000`
+   - Enable SSL offloading if needed
+
+3. Teammates access the app via the IIS site URL (e.g. `http://intranet.company.com/oracle-monitor`).
+
+> **Note:** IIS reverse proxy is more complex to configure than Nginx but is the preferred approach in Windows-only corporate environments where IT only permits IIS.
+
+---
+
+### Option 4 — Docker (any server, any OS)
+
+Containerise the whole app so IT can deploy it without touching Python.
+
+**`Dockerfile`** (create in the project root):
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements-core.txt .
+RUN pip install --no-cache-dir -r requirements-core.txt
+
+COPY . .
+
+EXPOSE 8000
+ENV API_HOST=0.0.0.0
+ENV CRAWL_SCHEDULE=false
+
+CMD ["python", "main.py", "--api-only"]
+```
+
+**`docker-compose.yml`:**
+
+```yaml
+version: "3.9"
+services:
+  oracle-monitor:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data      # persist database and project context
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    restart: unless-stopped
+```
+
+**Run:**
+
+```bash
+docker compose up -d
+```
+
+Teammates access: `http://server-ip:8000`
+
+The `data/` volume mount ensures the SQLite database, crawled data, and project instructions survive container restarts and upgrades.
+
+---
+
+### Keeping the app running (as a background service)
+
+On **Linux**, use `systemd`:
+
+```ini
+# /etc/systemd/system/oracle-monitor.service
+[Unit]
+Description=Oracle OCI/OIC Monitor
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/oracle-monitor
+ExecStart=/opt/oracle-monitor/runtime/python.exe main.py --api-only
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now oracle-monitor
+```
+
+On **Windows Server**, use the **Task Scheduler** or **NSSM** (Non-Sucking Service Manager):
+
+```bat
+nssm install OracleMonitor "C:\oracle-monitor\runtime\python.exe" "main.py --api-only"
+nssm set OracleMonitor AppDirectory "C:\oracle-monitor"
+nssm start OracleMonitor
+```
+
+---
+
+### Summary
+
+| Scenario | Setup effort | Best for |
+|---|---|---|
+| Uvicorn direct on a shared PC | Minimal — change 1 `.env` line | Small team, VPN-only access |
+| Nginx reverse proxy | Low — 1 config file | Linux server, internal intranet |
+| IIS reverse proxy | Medium — ARR module config | Windows Server, corporate IT |
+| Docker | Low — `docker compose up` | Any server, easiest for IT handoff |
+| GCP Compute Engine | Low — same as Linux server | Cloud-hosted, always-on |
+
+> **No code changes are needed** between any of these options. The Python app is identical — only the deployment wrapper differs.
+
+---
+
+## Deploying on Google Cloud Platform (GCP)
+
+The app has two constraints that shape the right GCP service choice:
+
+| Constraint | Why it matters |
+|---|---|
+| **SQLite** | Needs a persistent local filesystem — ephemeral containers lose data on restart |
+| **APScheduler** | Runs inside the Python process — the process must stay alive between requests |
+
+These rule out **Cloud Run** and **App Engine Standard** (both stateless/ephemeral) without significant code changes. The practical options are below, simplest first.
+
+---
+
+### Option 1 — Compute Engine VM ✅ Recommended
+
+A regular Linux VM in Google's cloud. SQLite works, the scheduler runs continuously, and no code changes are required.
+
+**Step 1 — Create the VM:**
+
+```bash
+# e2-micro is free-tier eligible; use e2-small (~$13/month) for daily use
+gcloud compute instances create oracle-monitor \
+  --machine-type=e2-small \
+  --image-family=debian-12 \
+  --image-project=debian-cloud \
+  --boot-disk-size=20GB \
+  --tags=http-server
+
+# Open port 8000 (or 80 if using Nginx in front)
+gcloud compute firewall-rules create allow-oracle-monitor \
+  --allow tcp:8000 \
+  --target-tags http-server
+```
+
+**Step 2 — SSH in and set up:**
+
+```bash
+gcloud compute ssh oracle-monitor
+
+# On the VM:
+sudo apt update && sudo apt install -y python3 python3-pip git
+
+# Copy your code (or clone from git)
+git clone <your-repo-url> /opt/oracle-monitor
+cd /opt/oracle-monitor
+
+pip3 install -r requirements-core.txt
+
+cp .env.example .env
+nano .env          # set API_HOST=0.0.0.0, CRAWL_SCHEDULE=false
+```
+
+**Step 3 — Run headless:**
+
+```bash
+python3 main.py --api-only
+```
+
+Access: `http://<VM-external-IP>:8000`
+
+**Step 4 — Keep it running after logout (systemd service):**
+
+```bash
+sudo nano /etc/systemd/system/oracle-monitor.service
+```
+
+```ini
+[Unit]
+Description=Oracle OCI/OIC Monitor
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/oracle-monitor
+ExecStart=/usr/bin/python3 main.py --api-only
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now oracle-monitor
+
+# Check status
+sudo systemctl status oracle-monitor
+
+# View live logs
+sudo journalctl -u oracle-monitor -f
+```
+
+---
+
+### Option 2 — Compute Engine + Docker (cleaner upgrades)
+
+Same VM as Option 1, but run via Docker so upgrades are just `git pull && docker compose up -d`.
+
+**On the VM:**
+
+```bash
+# Install Docker
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER && newgrp docker
+
+# Deploy
+cd /opt/oracle-monitor
+docker compose up -d
+
+# View logs
+docker compose logs -f
+
+# Upgrade
+git pull && docker compose up -d --build
+```
+
+Uses the `Dockerfile` and `docker-compose.yml` already in the project. The `./data` volume on the VM's persistent disk keeps the database, crawled files, and project instructions across container restarts and rebuilds.
+
+---
+
+### Option 3 — Cloud Run (requires code changes)
+
+Cloud Run is serverless — containers spin up per request and shut down on idle. This breaks two things in the current app:
+
+| Problem | Required fix |
+|---|---|
+| SQLite on ephemeral disk | Replace with **Cloud SQL (PostgreSQL)** |
+| APScheduler dies on idle | Replace with **Cloud Scheduler** calling `POST /crawl` on a schedule |
+| `project_context.txt` lost on restart | Store content in DB or **Cloud Storage** |
+
+Estimated effort: **1–2 weeks** of refactoring. Only worth pursuing if you need auto-scaling or zero-maintenance infrastructure.
+
+---
+
+### Option 4 — Cloud Run + Cloud SQL (full GCP-native)
+
+The scalable, fully managed architecture for larger teams or future growth:
+
+```
+Cloud Scheduler ──→ Cloud Run (FastAPI/Uvicorn)
+                          │
+                          ├──→ Cloud SQL (PostgreSQL)   ← replaces SQLite
+                          └──→ Cloud Storage             ← replaces data/ folder
+```
+
+**Monthly cost estimate (small team):**
+
+| Service | Est. cost |
+|---|---|
+| Cloud Run (per-request billing) | ~$0–5 |
+| Cloud SQL (db-f1-micro) | ~$10–25 |
+| Cloud Storage (< 1 GB) | < $1 |
+| **Total** | **~$15–30/month** |
+
+---
+
+### Adding HTTPS (SSL) on Compute Engine
+
+GCP provides free managed SSL via **Google Cloud Load Balancing**, but for a simple internal tool the easiest approach is **Nginx + Let's Encrypt**:
+
+```bash
+# Install Nginx and Certbot on the VM
+sudo apt install -y nginx certbot python3-certbot-nginx
+
+# Create Nginx config (replace with your domain)
+sudo nano /etc/nginx/sites-available/oracle-monitor
+```
+
+```nginx
+server {
+    listen 80;
+    server_name oracle-monitor.your-company.com;
+
+    location / {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 120s;
+    }
+}
+```
+
+```bash
+sudo ln -s /etc/nginx/sites-available/oracle-monitor /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl restart nginx
+
+# Issue a free SSL certificate
+sudo certbot --nginx -d oracle-monitor.your-company.com
+```
+
+After certbot runs, the app is available at `https://oracle-monitor.your-company.com`.
+
+> **Internal domain (no public DNS):** Use a self-signed certificate or your corporate CA instead of Let's Encrypt. Let's Encrypt requires a publicly reachable domain for verification.
+
+---
+
+### GCP cost summary
+
+| Option | Machine | Est. monthly cost | Notes |
+|---|---|---|---|
+| Compute Engine e2-micro | 1 vCPU / 1 GB | **Free** (always-free tier) | Light use only |
+| Compute Engine e2-small | 2 vCPU / 2 GB | **~$13** | Comfortable for daily use |
+| Compute Engine e2-medium | 2 vCPU / 4 GB | **~$27** | If running LLM locally (Ollama) |
+| Cloud Run + Cloud SQL | Serverless | **~$15–30** | Requires code changes |
+
+Plus ~$0.80/month per 20 GB persistent disk for VM options.
+
+> **Tip:** Stop the VM when not in use (`gcloud compute instances stop oracle-monitor`) to avoid charges. Restart with `gcloud compute instances start oracle-monitor`. The disk and all data are preserved.
 
 ---
 
