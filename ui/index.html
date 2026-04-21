@@ -1576,7 +1576,7 @@ async function markSeen(){
   }catch(e){}
 }
 async function purgeNonHcm(){
-  if(!confirm('Remove all legacy OCI/OIC records from the database?\nThis deletes sample data inserted before the HCM-only reconfiguration.\nReal HCM crawl data is NOT affected.'))return;
+  if(!confirm('Remove legacy OCI records and stale HCM REST API mock entries?\nReal HCM and OIC crawl data is NOT affected.'))return;
   try{
     const r=await api('/purge-non-hcm',{method:'POST'});
     setStatus(r.message);loadAll();

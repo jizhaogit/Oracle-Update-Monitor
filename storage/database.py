@@ -425,10 +425,13 @@ def delete_by_category(categories: list[str]) -> int:
 
 def delete_legacy_records() -> int:
     """
-    Delete all records that are not HCM What's New readiness data:
-      • Any record whose category is OCI or OIC
-      • Any HCM record whose doc_type is NOT 'whats_new'
-        (e.g. legacy REST API mock records inserted before the HCM-only reconfiguration)
+    Delete stale mock/seed records that no longer match active sources:
+      • HCM records whose doc_type is NOT 'whats_new'
+        (legacy REST API mock records from before the HCM-only reconfiguration)
+      • OCI records (OCI is not an active crawl source)
+
+    OIC records are intentionally kept — OIC What's New and Release Notes
+    are active sources and should never be purged here.
 
     Returns the total number of rows deleted.
     """
@@ -436,7 +439,7 @@ def delete_legacy_records() -> int:
     with session_scope() as s:
         rows = s.query(OracleUpdate).filter(
             or_(
-                OracleUpdate.category.in_(["OCI", "OIC"]),
+                OracleUpdate.category == "OCI",
                 and_(
                     OracleUpdate.category == "HCM",
                     OracleUpdate.doc_type  != "whats_new",

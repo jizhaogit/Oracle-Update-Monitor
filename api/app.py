@@ -210,11 +210,10 @@ def mark_seen():
 @app.post("/purge-non-hcm")
 def purge_non_hcm():
     """
-    Delete all legacy/non-readiness records:
-      - Any OCI or OIC category records
-      - Any HCM records that are NOT doc_type='whats_new'
-        (e.g. legacy REST API mock entries)
-    Useful for cleaning up data inserted before the HCM-only reconfiguration.
+    Delete stale mock/seed records that no longer match active sources:
+      - OCI records (OCI is not an active crawl source)
+      - HCM records with doc_type != 'whats_new' (legacy REST API mocks)
+    OIC records are kept — OIC is an active source.
     """
     n = delete_legacy_records()
     log.info("Purged %d legacy record(s) via /purge-non-hcm", n)
