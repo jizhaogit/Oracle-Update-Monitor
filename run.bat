@@ -85,6 +85,7 @@ echo.
 :: ════════════════════════════════════════════════════════
 
 :check_packages
+:: Quick exit if packages are already present
 runtime\python.exe -c "import sqlalchemy, fastapi, apscheduler" >nul 2>&1
 if %ERRORLEVEL%==0 (
     echo  [OK] Packages already installed.
@@ -92,20 +93,60 @@ if %ERRORLEVEL%==0 (
     goto :setup_env
 )
 
-echo  [..] Installing packages — this takes several minutes the first time...
+:: ── Prepare site-packages directory ───────────────────────────
+if not exist "runtime\Lib\site-packages" mkdir "runtime\Lib\site-packages"
+
+:: Write a clean _pth that explicitly includes Lib\site-packages
+:: (more reliable than relying on "import site" discovery)
+(
+    echo python311.zip
+    echo .
+    echo Lib\site-packages
+    echo.
+    echo import site
+) > "runtime\python311._pth"
+
+:: ── Locate system Python with pip ─────────────────────────────
+set SYS_PYTHON=
+if exist "%LOCALAPPDATA%\Programs\Python\Python314\python.exe" set SYS_PYTHON=%LOCALAPPDATA%\Programs\Python\Python314\python.exe
+if not defined SYS_PYTHON if exist "%LOCALAPPDATA%\Programs\Python\Python313\python.exe" set SYS_PYTHON=%LOCALAPPDATA%\Programs\Python\Python313\python.exe
+if not defined SYS_PYTHON if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" set SYS_PYTHON=%LOCALAPPDATA%\Programs\Python\Python312\python.exe
+if not defined SYS_PYTHON if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" set SYS_PYTHON=%LOCALAPPDATA%\Programs\Python\Python311\python.exe
+if not defined SYS_PYTHON if exist "%LOCALAPPDATA%\Programs\Python\Python310\python.exe" set SYS_PYTHON=%LOCALAPPDATA%\Programs\Python\Python310\python.exe
+if not defined SYS_PYTHON if exist "%PROGRAMFILES%\Python314\python.exe" set SYS_PYTHON=%PROGRAMFILES%\Python314\python.exe
+if not defined SYS_PYTHON if exist "%PROGRAMFILES%\Python313\python.exe" set SYS_PYTHON=%PROGRAMFILES%\Python313\python.exe
+if not defined SYS_PYTHON if exist "%PROGRAMFILES%\Python312\python.exe" set SYS_PYTHON=%PROGRAMFILES%\Python312\python.exe
+
+if not defined SYS_PYTHON (
+    echo  [ERROR] No system Python found to install packages.
+    echo.
+    echo  Please install Python 3.9+ from https://www.python.org/downloads/
+    echo  then run run.bat again.
+    echo.
+    echo  OR install packages manually on any machine with internet access:
+    echo    python -m pip install -r requirements-core.txt --target runtime\Lib\site-packages
+    echo.
+    pause & exit /b 1
+)
+
+echo  [..] Installing packages using: %SYS_PYTHON%
 echo      (sqlalchemy, langchain, fastapi, beautifulsoup4, uvicorn, APScheduler...)
+echo      This takes several minutes on first run...
 echo.
-runtime\python.exe -m pip install -r requirements-core.txt ^
+
+"%SYS_PYTHON%" -m pip install -r requirements-core.txt ^
+    --target "runtime\Lib\site-packages" ^
+    --python-version 3.11 --abi cp311 --platform win_amd64 --only-binary :all: ^
     --no-warn-script-location ^
     --disable-pip-version-check
 
-:: Verify — do NOT rely on pip exit code (can be non-zero even on success)
+:: Verify
 runtime\python.exe -c "import sqlalchemy, fastapi, apscheduler" >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo.
     echo  [ERROR] Package installation failed.
-    echo  Check your internet connection and try again, or run:
-    echo    runtime\python.exe -m pip install -r requirements-core.txt
+    echo  Try running this manually and check for errors:
+    echo    "%SYS_PYTHON%" -m pip install -r requirements-core.txt --target runtime\Lib\site-packages
     pause & exit /b 1
 )
 echo.
