@@ -181,11 +181,14 @@ def _get_chain():
     return _chain
 
 
-def llm_classify(record: dict) -> dict:
+def llm_classify(record: dict, timeout: Optional[int] = LLM_TIMEOUT) -> dict:
     """
     Use LangChain LLM to enrich a record with impact_level, tags, and summary.
-    Falls back to rule-based if LLM_TIMEOUT seconds elapse or any error occurs.
-    Uses a daemon thread so a slow LLM never blocks the crawl indefinitely.
+
+    timeout : seconds to wait for the LLM before falling back to rule-based.
+              Pass None to wait indefinitely (used by reclassify-all / Mark Impact
+              so a slow local model like Ollama is never cut short).
+              Defaults to LLM_TIMEOUT (fast crawl-time classification).
     """
     import threading
 
@@ -220,7 +223,7 @@ def llm_classify(record: dict) -> dict:
 
     t = threading.Thread(target=_invoke, daemon=True)
     t.start()
-    t.join(timeout=LLM_TIMEOUT)
+    t.join(timeout=timeout)   # None = wait forever
 
     if "parsed" in bucket:
         parsed = bucket["parsed"]
@@ -233,19 +236,30 @@ def llm_classify(record: dict) -> dict:
 
     if "error" in bucket:
         log.warning("LLM classification failed (%s), using rule-based", bucket["error"])
-    else:
+    elif timeout is not None:
         log.warning("LLM classify timeout (%ds) for '%s' — using rule-based",
-                    LLM_TIMEOUT, record.get("title", "")[:50])
+                    timeout, record.get("title", "")[:50])
     return rule_classify(record)
 
 
 def classify(record: dict) -> dict:
     """
-    Main entry point: classify a record dict.
-    Uses LLM if configured, otherwise rule-based.
+    Classify with the short crawl-time timeout (LLM_TIMEOUT).
+    Used during live crawls — keeps each record fast, falls back to rule-based on timeout.
     """
     if LLM_PROVIDER in ("openai", "anthropic", "bedrock", "ollama"):
-        return llm_classify(record)
+        return llm_classify(record, timeout=LLM_TIMEOUT)
+    return rule_classify(record)
+
+
+def classify_unlimited(record: dict) -> dict:
+    """
+    Classify with no timeout — waits as long as the LLM needs.
+    Used by reclassify-all (Mark Impact) so slow local models like Ollama
+    are never cut short mid-classification.
+    """
+    if LLM_PROVIDER in ("openai", "anthropic", "bedrock", "ollama"):
+        return llm_classify(record, timeout=None)
     return rule_classify(record)
 
 

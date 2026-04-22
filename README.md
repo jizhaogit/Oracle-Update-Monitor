@@ -19,7 +19,8 @@ An intelligent, self-contained tool for tracking Oracle Cloud Infrastructure (OC
    - [Step-by-step: Docker on Compute Engine](#step-by-step-docker-deployment-on-compute-engine)
    - [Cost summary](#cost-summary)
 9. [Configuration](#configuration)
-10. [Using the UI](#using-the-ui)
+10. [Using Ollama for Local AI (Free, No API Key)](#using-ollama-for-local-ai-free-no-api-key)
+11. [Using the UI](#using-the-ui)
     - [Toolbar](#toolbar)
     - [Sidebar](#sidebar)
     - [Detail View](#detail-view)
@@ -34,12 +35,12 @@ An intelligent, self-contained tool for tracking Oracle Cloud Infrastructure (OC
     - [Jira-Aware Analysis](#jira-aware-analysis)
     - [Project Instructions](#project-instructions)
     - [Appearance Settings](#appearance-settings)
-11. [User Customisations Survive Crawls](#user-customisations-survive-crawls)
-12. [REST API Reference](#rest-api-reference)
-13. [Command-Line Options](#command-line-options)
-14. [Project Structure](#project-structure)
-15. [Dependencies](#dependencies)
-16. [Troubleshooting](#troubleshooting)
+12. [User Customisations Survive Crawls](#user-customisations-survive-crawls)
+13. [REST API Reference](#rest-api-reference)
+14. [Command-Line Options](#command-line-options)
+15. [Project Structure](#project-structure)
+16. [Dependencies](#dependencies)
+17. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -872,6 +873,78 @@ LOG_LEVEL=INFO              # DEBUG | INFO | WARNING | ERROR
 ```
 
 > **Note:** The application works fully without any API key. Set `LLM_PROVIDER=none` to use the built-in rule-based classifier. The LLM is only called when you click **🧠 Analyze Impact & Upgrade Guide** or run **⚡ Mark Impact** — routine crawling always uses rule-based classification unless an LLM is configured.
+
+---
+
+## Using Ollama for Local AI (Free, No API Key)
+
+[Ollama](https://ollama.com) lets you run AI models locally on your own machine — no internet connection to an AI service, no API key, and no usage cost. It is **not installed automatically** by `run.bat`; you need to set it up once manually.
+
+### Step 1 — Install Ollama
+
+1. Go to **[ollama.com](https://ollama.com)** and click **Download**.
+2. Run the installer (`OllamaSetup.exe`).
+3. After installation, Ollama runs silently in the background (check the system tray).
+
+### Step 2 — Download a Model
+
+Open **PowerShell** or **Command Prompt** and run:
+
+```powershell
+ollama pull llama3
+```
+
+This downloads the Llama 3 model (~4 GB). It only needs to be done once.
+
+> **Recommended models by machine spec:**
+>
+> | Your machine | Recommended model | Pull command |
+> |---|---|---|
+> | 8 GB RAM (minimum) | `llama3` | `ollama pull llama3` |
+> | 16 GB RAM | `llama3` or `mistral` | `ollama pull mistral` |
+> | 32 GB RAM or GPU | `llama3:70b` | `ollama pull llama3:70b` |
+>
+> Larger models give richer AI analysis but take longer to respond.
+> If classification times out, `LLM_TIMEOUT` in `.env` can be increased.
+
+### Step 3 — Configure the App
+
+Open `.env` and set:
+
+```ini
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3
+```
+
+Make sure `OLLAMA_MODEL` matches exactly what you pulled (e.g. `llama3`, `mistral`, `llama3:70b`).
+
+### Step 4 — Restart the App
+
+Close the `run.bat` window and run it again. You should see in `logs/oracle_monitor.log`:
+
+```
+[INFO] processor.classifier: LLM: Ollama (chat) llama3 @ http://localhost:11434
+```
+
+### Step 5 — Test It
+
+1. Open the UI and click on any update item.
+2. Select it for conclusion (radio button).
+3. Click **📋 Conclusion** → **🧠 Analyze Impact & Upgrade Guide**.
+4. The analysis should now return AI-generated guidance instead of the rule-based fallback.
+
+### Troubleshooting Ollama
+
+| Symptom | Fix |
+|---|---|
+| `LLM init failed` in the log | Run `ollama serve` in a terminal to start Ollama, or check the system tray icon |
+| Analysis times out and falls back to rule-based | Increase `LLM_TIMEOUT=30` (or higher) in `.env` and restart |
+| `model not found` error | Run `ollama pull llama3` again — the model may not have downloaded fully |
+| Very slow responses | Use a smaller model (`llama3` instead of `llama3:70b`) or close other applications |
+| Works on your machine but not a colleague's | Ollama must be installed and running **on each machine separately** — it is not shared over the network |
+
+> **Tip:** Ollama keeps running after the model is pulled — you don't need to run `ollama serve` manually after a reboot if you used the installer (it registers itself as a background service). If it stops, open **Ollama** from the Start menu or run `ollama serve` in a terminal.
 
 ---
 
