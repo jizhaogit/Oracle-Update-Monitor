@@ -119,7 +119,7 @@ def _backfill_ui_impact() -> None:
             needs_medium = any(kw in text for kw in _UI_MEDIUM_KW)
             needs_tag    = any(kw in text for kw in _UI_TAG_KW)
 
-            if needs_medium:
+            if needs_medium and not rec.impact_overridden:
                 rec.impact_level = "Medium"
                 promoted += 1
 
