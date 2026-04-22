@@ -661,7 +661,7 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
           <!-- Flag for Review panel -->
           <div id="d-flag-panel">
             <div class="fp-title">🚩 Flag for Review</div>
-            <textarea id="d-flag-note" placeholder="Jira URL, reason, or any free-text annotation (e.g. https://jira.tssi.ca/browse/BGCO-1234)" oninput="_updateJiraTestBtn(this.value)"></textarea>
+            <textarea id="d-flag-note" placeholder="Jira URL, reason, or any free-text annotation (e.g. https://jira.your-company.com/browse/PROJ-1234)" oninput="_updateJiraTestBtn(this.value)"></textarea>
             <div class="fp-row">
               <button class="btn-flag" id="btn-flag-set" onclick="saveFlag()">🚩 Flag this item</button>
               <button class="btn-unflag" id="btn-flag-clear" onclick="clearFlag()" style="display:none">✕ Clear Flag</button>
@@ -928,7 +928,7 @@ async function loadAll(){
     const prevMod=modSel.value;
     modSel.innerHTML='<option value="">All</option>';
     const nonHcmCats=cats.filter(c=>c!=='HCM');
-    const combined=[...nonHcmCats, ...svcs.filter(s=>!nonHcmCats.includes(s))];
+    const combined=[...nonHcmCats, ...svcs.filter(s=>!nonHcmCats.includes(s))].sort((a,b)=>a.localeCompare(b));
     combined.forEach(entry=>{
       const o=document.createElement('option');
       o.value=entry; o.textContent=entry;

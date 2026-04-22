@@ -16,7 +16,7 @@ from urllib3.util.retry import Retry
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from config import HTTP_PROXY, HTTPS_PROXY, MAX_RETRIES, REQUEST_DELAY, REQUEST_TIMEOUT, VERIFY_SSL
+from config import HTTP_PROXY, HTTPS_PROXY, MAX_RETRIES, REQUEST_DELAY, REQUEST_TIMEOUT, VERIFY_SSL, SSL_CERT_FILE
 
 log = logging.getLogger(__name__)
 
@@ -108,6 +108,9 @@ def _build_session() -> requests.Session:
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         log.warning("SSL verification DISABLED (VERIFY_SSL=false)")
+    elif SSL_CERT_FILE:
+        session.verify = SSL_CERT_FILE
+        log.info("Using custom CA bundle: %s", SSL_CERT_FILE)
 
     return session
 

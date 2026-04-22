@@ -277,9 +277,12 @@ HTTP_PROXY  = os.getenv("HTTP_PROXY",  "")
 HTTPS_PROXY = os.getenv("HTTPS_PROXY", "")
 
 # SSL certificate verification.
-# Set VERIFY_SSL=false if your corporate VPN performs SSL inspection
-# and you see certificate errors in the log.
-VERIFY_SSL = os.getenv("VERIFY_SSL", "true").lower() not in ("false", "0", "no")
+# Corporate VPN / proxy SSL inspection causes "certificate verify failed" errors.
+# Option A (recommended): export your corporate CA cert as a .pem/.crt file and set:
+#   SSL_CERT_FILE=C:\path\to\corporate-ca.pem
+# Option B (quick fix):  set VERIFY_SSL=false to skip verification entirely.
+VERIFY_SSL    = os.getenv("VERIFY_SSL", "true").lower() not in ("false", "0", "no")
+SSL_CERT_FILE = os.getenv("SSL_CERT_FILE", "").strip() or None
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
