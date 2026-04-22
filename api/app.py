@@ -269,13 +269,13 @@ def reclassify_all_endpoint():
 
     def _do():
         try:
-            from processor.classifier import classify
+            from processor.classifier import classify_unlimited
             records = list_updates(limit=10000)
             _reclassify_status["total"] = len(records)
             log.info("Reclassify-all: %d records to process", len(records))
             for rec in records:
                 try:
-                    classified = classify(rec)
+                    classified = classify_unlimited(rec)
                     update_classification(
                         rec["id"],
                         classified.get("impact_level", "Low"),
