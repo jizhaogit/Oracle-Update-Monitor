@@ -34,6 +34,8 @@ DATABASE_URL = f"sqlite:///{DB_DIR}/oracle_monitor.db"
 # Users can edit that file with Notepad — no code changes needed.
 
 SOURCES_FILE = BASE_DIR / "sources.ini"
+INSTRUCTION_FILE = BASE_DIR / "instruction.ini"
+INSTRUCTION_EXAMPLE_FILE = BASE_DIR / "instruction.ini.example"
 
 _DEFAULT_SOURCES_INI = """\
 # Oracle Update Monitor — Source URLs
@@ -123,6 +125,32 @@ def _load_sources() -> dict[str, dict]:
 
 
 ORACLE_SOURCES: dict[str, dict] = _load_sources()
+
+
+def _init_instruction_file() -> None:
+    """
+    If instruction.ini does not exist yet, seed it from instruction.ini.example.
+    This mirrors the pattern used for sources.ini auto-creation.
+    """
+    if not INSTRUCTION_FILE.exists():
+        if INSTRUCTION_EXAMPLE_FILE.exists():
+            content = INSTRUCTION_EXAMPLE_FILE.read_text(encoding="utf-8")
+            INSTRUCTION_FILE.write_text(content, encoding="utf-8")
+        else:
+            # Minimal fallback if the example file is also missing.
+            # Must match the current schema: [Project], [Scope], [Context], [Crawl].
+            # [Priority] and [Notes] are obsolete — do NOT include them here.
+            INSTRUCTION_FILE.write_text(
+                "# Oracle Update Monitor — Project Instructions\n"
+                "[Project]\ndescription =\n\n"
+                "[Scope]\nmodules =\nintegrations =\n\n"
+                "[Context]\nnotes =\n\n"
+                "[Crawl]\nextra_keywords =\n",
+                encoding="utf-8",
+            )
+
+
+_init_instruction_file()
 
 # Impact-level keywords used by the rule-based classifier
 IMPACT_KEYWORDS: dict[str, list[str]] = {
@@ -269,6 +297,25 @@ HCM_MODULE_KEYWORDS: list[str] = [
     ).split(",")
     if k.strip()
 ]
+
+def _read_instruction_extra_keywords() -> list[str]:
+    """Read [Crawl] extra_keywords from instruction.ini and return as a list."""
+    try:
+        if INSTRUCTION_FILE.exists():
+            cp = configparser.RawConfigParser()
+            cp.read(str(INSTRUCTION_FILE), encoding="utf-8")
+            raw = cp.get("Crawl", "extra_keywords", fallback="")
+            return [k.strip() for k in raw.split(",") if k.strip()]
+    except Exception:
+        pass
+    return []
+
+
+# Merge extra keywords from instruction.ini into HCM_MODULE_KEYWORDS
+_extra_kw = _read_instruction_extra_keywords()
+for _kw in _extra_kw:
+    if _kw not in HCM_MODULE_KEYWORDS:
+        HCM_MODULE_KEYWORDS.append(_kw)
 
 # Corporate proxy support — set these in .env when running behind a VPN.
 # Example:  HTTPS_PROXY=http://proxy.company.com:8080

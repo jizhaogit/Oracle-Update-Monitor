@@ -495,34 +495,41 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
   font-size:1.2rem;width:30px;height:30px;border-radius:4px;cursor:pointer;line-height:1}
 #cfg-close:hover{background:var(--telus-crimson);color:#fff}
 #cfg-body{flex:1;overflow-y:auto;padding:20px 24px;display:flex;flex-direction:column;gap:16px}
-#cfg-drop{border:2px dashed var(--telus-mystic);border-radius:8px;padding:36px 24px;
-  text-align:center;cursor:pointer;transition:border-color .2s,background .2s;
-  background:var(--telus-brandworld-white)}
-#cfg-drop:hover,#cfg-drop.drag-over{border-color:var(--telus-purple);background:var(--telus-purple-light)}
-#cfg-drop-icon{font-size:2.2rem;margin-bottom:8px}
-#cfg-drop-label{font-size:0.93rem;color:var(--text-dim);margin-bottom:6px}
-#cfg-drop-hint{font-size:0.78rem;color:var(--telus-cloud)}
-#cfg-file-input{display:none}
-#cfg-filename{font-size:0.82rem;color:var(--telus-accessible-green);font-weight:600;margin-top:6px}
 /* ── Project Instructions section ── */
 #pi-section{border:1px solid var(--telus-mystic);border-radius:8px;padding:16px 20px;
   background:var(--telus-brandworld-white)}
 #pi-section h3{font-size:0.95rem;font-weight:600;color:var(--telus-purple);margin-bottom:4px;
   display:flex;align-items:center;gap:8px}
-#pi-section .pi-sub{font-size:0.8rem;color:var(--text-dim);margin-bottom:10px}
-#pi-textarea{width:100%;min-height:120px;max-height:600px;resize:vertical;
-  border:1px solid var(--telus-mystic);border-radius:6px;padding:10px 12px;
-  font-size:0.88rem;font-family:inherit;line-height:1.5;color:var(--text);
-  background:var(--telus-white);box-sizing:border-box}
-#pi-textarea:focus{outline:none;border-color:var(--telus-purple)}
-.pi-row{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+#pi-section .pi-sub{font-size:0.8rem;color:var(--text-dim);margin-bottom:12px}
+.pi-field-group{margin-bottom:10px}
+.pi-label{display:block;font-size:0.8rem;font-weight:600;color:var(--telus-purple);margin-bottom:2px}
+.pi-help{font-size:0.76rem;color:var(--text-dim);margin-bottom:4px}
+.pi-textarea-ro{width:100%;resize:vertical;border:1px solid var(--telus-mystic);border-radius:6px;
+  padding:7px 10px;font-size:0.84rem;font-family:inherit;line-height:1.5;color:var(--text);
+  background:var(--bg-card);box-sizing:border-box;cursor:default}
+.pi-textarea-ro:focus{outline:none}
+body.night .pi-textarea-ro{background:var(--bg-light);border-color:#3a3f6a}
+.pi-row{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
 #pi-status{font-size:0.82rem;flex:1}
 #pi-status.active{color:var(--telus-accessible-green);font-weight:600}
 #pi-status.inactive{color:var(--text-dim)}
 #pi-badge{display:none;font-size:0.72rem;font-weight:700;background:var(--telus-accessible-green);
   color:#fff;border-radius:4px;padding:1px 6px;margin-left:6px}
 #pi-badge.on{display:inline-block}
-#cfg-sheets{display:flex;flex-direction:column;gap:10px}
+/* Coverage check modal */
+#cov-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2100;display:none;align-items:center;justify-content:center}
+#cov-overlay.open{display:flex}
+#cov-modal{background:var(--bg-mid);border-radius:10px;padding:24px 28px;max-width:560px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.25)}
+#cov-modal h3{font-size:1rem;font-weight:700;color:var(--telus-purple);margin-bottom:6px}
+.cov-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-row)}
+.cov-item:last-child{border-bottom:none}
+.cov-item input[type=checkbox]{margin-top:3px;flex-shrink:0;width:16px;height:16px;accent-color:var(--telus-purple)}
+.cov-item-label{flex:1}
+.cov-item-label strong{display:block;font-size:0.9rem}
+.cov-item-label span{font-size:0.8rem;color:var(--text-dim)}
+.cov-badge{font-size:0.72rem;font-weight:700;padding:1px 6px;border-radius:3px;margin-left:6px}
+.cov-badge-ai{background:#e3f2fd;color:#1565c0}
+.cov-badge-rule{background:#f3e5f5;color:#6a1b9a}
 .cfg-sheet-card{background:var(--telus-brandworld-white);border:1px solid var(--telus-mystic);
   border-radius:6px;overflow:hidden}
 .cfg-sheet-header{padding:9px 14px;background:var(--telus-purple-light);
@@ -539,10 +546,8 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
   white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis}
 .cfg-sheet-table tbody tr:hover td{background:var(--telus-alabaster)}
 .cfg-empty-sheet{padding:12px 14px;font-size:0.82rem;color:var(--text-dim);font-style:italic}
-#cfg-status{font-size:0.82rem;color:var(--text-dim);text-align:center}
 </style>
 </head>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <body>
 
 <!-- Toolbar -->
@@ -829,22 +834,50 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
       <div id="pi-section">
         <h3>📋 Project Instructions <span id="pi-badge">ACTIVE</span></h3>
         <div class="pi-sub">
-          Describe your project — modules in scope, key integrations, business focus.
-          When an LLM is configured, the classifier uses this to judge impact relevance.
-          Leave blank to use the default rule-based ranking.
-          Upload a <code>.txt</code> file <em>or</em> type below — not both.
+          Read-only view of <code>instruction.ini</code> in the project folder.
+          Edit that file directly with a text editor, then click 🔄 Reload to refresh.
         </div>
-        <textarea id="pi-textarea"
-          placeholder="Example: We are implementing Oracle HCM for a mid-size company. Our project scope includes Compensation, Recruiting, and Human Resources. We have custom integrations with our payroll vendor and an internal BI tool. Changes to Compensation calculations, REST APIs, or Redwood UI are High priority for us. Recruiting workflow changes are Medium. Unrelated modules are Low."></textarea>
-        <div class="pi-row" style="flex-wrap:wrap;gap:6px;align-items:center">
-          <button class="btn btn-sec" id="pi-upload-btn" onclick="document.getElementById('pi-txt-input').click()">📄 Upload .txt</button>
-          <input type="file" id="pi-txt-input" accept=".txt" style="display:none" onchange="piFileSelected(this.files[0])">
-          <span id="pi-file-badge" style="display:none;align-items:center;gap:4px;background:var(--telus-cloud);border:1px solid var(--telus-mystic);border-radius:4px;padding:2px 8px;font-size:0.82rem">
-            📄 <span id="pi-file-name" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
-            <button class="btn btn-sec" onclick="piRemoveFile()" style="padding:1px 6px;font-size:0.78rem;margin-left:4px">✕</button>
-          </span>
-          <button class="btn" onclick="saveProjectInstructions()">💾 Save</button>
+
+        <div class="pi-field-group">
+          <label class="pi-label">Project Description</label>
+          <div class="pi-help">Describe your project, technology stack, and team context</div>
+          <textarea id="pi-description" class="pi-textarea-ro" readonly rows="4" placeholder="(not set — edit instruction.ini)"></textarea>
+        </div>
+
+        <div class="pi-field-group">
+          <label class="pi-label">Scope — Oracle Modules</label>
+          <div class="pi-help">Oracle modules and services your project uses (comma-separated). This list is compared against current crawl sources to detect missing coverage.</div>
+          <textarea id="pi-modules" class="pi-textarea-ro" readonly rows="2" placeholder="(not set — edit instruction.ini)"></textarea>
+        </div>
+
+        <div class="pi-field-group">
+          <label class="pi-label">Active Categories <span style="font-weight:400;color:var(--telus-accessible-green);font-size:0.82em">● auto-derived from sources.ini</span></label>
+          <div class="pi-help">Automatically detected from your active crawl sources — no need to set this manually. To add or remove a category, edit sources.ini.</div>
+          <textarea id="pi-categories" class="pi-textarea-ro" readonly rows="1" placeholder="(no active sources configured)"></textarea>
+        </div>
+
+        <div class="pi-field-group">
+          <label class="pi-label">Scope — External Integrations</label>
+          <div class="pi-help">List external systems your Oracle implementation connects to (e.g. Payroll vendor, BI tool). The AI uses this during <strong>Mark Impact</strong> to detect whether an Oracle change could cascade into your integrations and raise its impact level. <em>Has no effect with rule-based classification or during crawl.</em> Edit instruction.ini to update.</div>
+          <textarea id="pi-integrations" class="pi-textarea-ro" readonly rows="2" placeholder="(not set — edit instruction.ini)"></textarea>
+        </div>
+
+        <div class="pi-field-group">
+          <label class="pi-label">What Matters to Us</label>
+          <div class="pi-help">Describe your team's priorities in plain language. The AI reads this to judge impact intelligently — no rigid keyword rules. Explain which modules are business-critical, what kinds of changes would cause disruption, and what your team monitors vs. acts on immediately.</div>
+          <textarea id="pi-context" class="pi-textarea-ro" readonly rows="5" placeholder="(not set — edit instruction.ini)"></textarea>
+        </div>
+
+        <div class="pi-field-group" id="pi-extra-kw-group" style="display:none">
+          <label class="pi-label">Auto-added Crawl Keywords</label>
+          <div class="pi-help">Modules added via Coverage Check — merged with HCM_MODULE_KEYWORDS on next restart</div>
+          <textarea id="pi-extra-keywords" class="pi-textarea-ro" readonly rows="1"></textarea>
+        </div>
+
+        <div class="pi-row">
+          <button class="btn btn-sec" onclick="loadProjectInstructions()">🔄 Reload</button>
           <button class="btn btn-conclude" onclick="markImpact()" id="pi-mark-btn">⚡ Mark Impact</button>
+          <button class="btn btn-sec" onclick="checkCoverage()" id="pi-cov-btn">🔍 Check Coverage</button>
         </div>
         <div id="pi-progress" style="display:none;margin-top:10px">
           <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:4px">
@@ -858,20 +891,22 @@ input[type=color]{width:32px;height:32px;border:1px solid var(--telus-mystic);bo
           <span id="pi-status" class="inactive">Not set — using rule-based ranking</span>
         </div>
       </div>
-
-      <!-- ── Excel Project Config ───────────────────────── -->
-      <div id="cfg-drop" onclick="document.getElementById('cfg-file-input').click()"
-           ondragover="cfgDragOver(event)" ondragleave="cfgDragLeave(event)" ondrop="cfgDrop(event)">
-        <div id="cfg-drop-icon">📂</div>
-        <div id="cfg-drop-label">Click to browse or drag &amp; drop your Excel file here</div>
-        <div id="cfg-drop-hint">Supports .xlsx, .xls, .xlsm, .csv</div>
-        <div id="cfg-filename"></div>
-      </div>
-      <input type="file" id="cfg-file-input" accept=".xlsx,.xls,.xlsm,.csv"
-             onchange="cfgFileSelected(this.files[0])">
-      <div id="cfg-status"></div>
-      <div id="cfg-sheets"></div>
     </div>
+  </div>
+</div>
+
+<!-- Coverage Check Modal -->
+<div id="cov-overlay" onclick="covCloseBg(event)">
+  <div id="cov-modal">
+    <h3>🔍 Coverage Check</h3>
+    <p id="cov-subtitle" style="font-size:0.85rem;color:var(--text-dim);margin-bottom:14px"></p>
+    <div id="cov-list"></div>
+    <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="btn btn-sec" onclick="closeCovModal()">Cancel</button>
+      <button class="btn" id="cov-select-all" onclick="covSelectAll()">☑ Select All</button>
+      <button class="btn btn-conclude" id="cov-apply-btn" onclick="covApply()">➕ Add to Crawl</button>
+    </div>
+    <div id="cov-result" style="margin-top:10px;font-size:0.85rem"></div>
   </div>
 </div>
 
@@ -884,6 +919,7 @@ const IC={High:'var(--red)',Medium:'var(--orange)',Low:'var(--green)'};
 
 let ALL=[], selId=null;
 let selConclId=null;   // single ID selected for conclusion (radio pick)
+let _parentTitleSet=new Set(); // titles that are section-header parent nodes
 let groupBy='version';   // 'category' | 'version'
 let _currentFlagId=null; // ID of the item currently shown in detail view
 let _aiSearchResults=null;   // null = not in AI mode; array = AI search results
@@ -1087,6 +1123,18 @@ function renderTree(items){
     }
   });
 
+  // ── Compute parent set from full ALL dataset (filter-independent) ──
+  _parentTitleSet=new Set();
+  const _allByTitle={};
+  ALL.forEach(u=>_allByTitle[u.title]=true);
+  ALL.forEach(u=>{
+    const parts=u.title.split(' \u2014 ');
+    for(let i=parts.length-1;i>=1;i--){
+      const pt=parts.slice(0,i).join(' \u2014 ');
+      if(_allByTitle[pt]){_parentTitleSet.add(pt);break;}
+    }
+  });
+
   // ── Filter ──────────────────────────────────────────────
   let visible;
   if(q){
@@ -1134,15 +1182,23 @@ function renderTree(items){
         ? item.title.replace(/^HCM\s*\u2014\s*/,'')                  // strip redundant "HCM — "
         : (CI[item.category]||'')+' '+(item.category||'')+' \u2014 '+item.title; // "🔗 OIC — October 2025"
 
+    // Parent nodes (section headers) get no impact colour, no radio, no detail
     const cls='t-item'+(item.is_new?' isnew':'')+
-      (imp==='High'?' hi':imp==='Medium'?' me':imp==='Low'?' lo':'')+
-      (isAutoEnabled(item)?' auto-on':'');
+      (hasKids?'':imp==='High'?' hi':imp==='Medium'?' me':imp==='Low'?' lo':'')+
+      (isAutoEnabled(item)&&!hasKids?' auto-on':'');
     const row=el('div',cls);
     row.dataset.id=item.id;
 
-    const rb=document.createElement('input');
-    rb.type='radio';rb.name='sel-radio';rb.value=item.id;rb.checked=item.id===selConclId;
-    rb.onclick=e=>{e.stopPropagation();selectForConclusion(item.id);showDetail(item)};
+    let rb=null;
+    if(!hasKids){
+      rb=document.createElement('input');
+      rb.type='radio';rb.name='sel-radio';rb.value=item.id;rb.checked=item.id===selConclId;
+      rb.onclick=e=>{e.stopPropagation();selectForConclusion(item.id);showDetail(item)};
+    } else {
+      // Spacer keeps alignment consistent with child rows
+      const sp=el('span','');sp.style.cssText='width:14px;height:14px;display:inline-block;flex-shrink:0';
+      row.appendChild(sp);
+    }
 
     const tog=el('span','t-toggle',hasKids?'▸':'');
 
@@ -1150,13 +1206,14 @@ function renderTree(items){
     lbl.title=item.title;
 
     const isUi=(item.tags||[]).includes('Redwood UI');
-    const uiIcon=isUi?el('span','t-ui-icon','🖥'):null;
-    const flagIcon=item.is_flagged?el('span','t-flag-icon','🚩'):null;
-    const cmtIcon=item.user_comment?el('span','t-flag-icon','💬'):null;
-    const autoEl=isAutoEnabled(item)?el('span','t-auto-icon','AUTO'):null;
+    const uiIcon=isUi&&!hasKids?el('span','t-ui-icon','🖥'):null;
+    const flagIcon=item.is_flagged&&!hasKids?el('span','t-flag-icon','🚩'):null;
+    const cmtIcon=item.user_comment&&!hasKids?el('span','t-flag-icon','💬'):null;
+    const autoEl=isAutoEnabled(item)&&!hasKids?el('span','t-auto-icon','AUTO'):null;
     if(autoEl) autoEl.title='Auto-enabled: Oracle pushed this directly — no action needed to enable it';
 
-    row.appendChild(rb);row.appendChild(tog);row.appendChild(lbl);
+    if(rb)row.appendChild(rb);
+    row.appendChild(tog);row.appendChild(lbl);
     if(autoEl)row.appendChild(autoEl);
     if(uiIcon)row.appendChild(uiIcon);
     if(flagIcon)row.appendChild(flagIcon);
@@ -1185,7 +1242,6 @@ function renderTree(items){
       row.onclick=e=>{
         if(e.target===rb)return;
         toggle();
-        selectForConclusion(item.id);showDetail(item);
       };
     } else {
       row.onclick=()=>{selectForConclusion(item.id);showDetail(item)};
@@ -1689,6 +1745,7 @@ function exportStatsCSV(){
     return /[",\n\r]/.test(s)?`"${s}"`:s;
   };
   const rows=[esc(title),cols.map(esc).join(',')];
+  items=items.filter(u=>!_parentTitleSet.has(u.title));
   items.forEach(u=>{
     rows.push([
       u.title||'',
@@ -1944,8 +2001,8 @@ function renderConclusion(records){
   $('btn-analyze').disabled=false;
   $('btn-regenerate').style.display='none';
   $('modal-overlay').classList.add('open');
-  // Auto-load cached analysis if available
-  _loadCachedAnalysis();
+  // Auto-run analysis on open; uses cache if available, otherwise starts AI job
+  runAnalysis(false);
 
   const hasManyVersions=records.some(r=>(r.version_count||1)>1);
   const subtitle=records.length===1
@@ -1955,10 +2012,18 @@ function renderConclusion(records){
 
   let html='';
 
-  /* ── Side-by-side comparison table for all selected items ── */
-  html+=`<h3 style="color:var(--accent2);font-size:13px;margin-bottom:10px">
-    Side-by-Side Comparison</h3>`;
-  html+=buildSideBySideTable(records);
+  /* ── Topic subject(s) — one heading per selected item ── */
+  html+=`<div style="margin-bottom:14px">`;
+  records.forEach(r=>{
+    html+=`<div style="font-size:0.85rem;font-weight:600;color:var(--text-main);
+      padding:6px 10px;background:var(--telus-brandworld-white);
+      border-left:3px solid var(--accent2);border-radius:3px;margin-bottom:6px">
+      ${esc(r.title)}
+      <span style="font-weight:400;color:var(--text-dim);font-size:0.75rem;margin-left:8px">
+        ${esc(r.category)} · ${esc(r.service)}</span>
+    </div>`;
+  });
+  html+=`</div>`;
 
   /* ── Per-item version history (if any item has >1 version) ── */
   records.forEach(rec=>{
@@ -2397,7 +2462,6 @@ function closeCfgOnBg(e){
 }
 
 /* ── Project Instructions ────────────────────────────── */
-let _piFromFile=false;          // true when content came from a .txt upload
 let _piPollTimer=null;          // setInterval handle for reclassify polling
 
 function _setPiStatus(active){
@@ -2415,83 +2479,29 @@ function _setPiStatus(active){
   }
 }
 
-function _piSetFileMode(filename){
-  // File uploaded: disable textarea, show file badge, hide upload button text
-  _piFromFile=true;
-  $('pi-textarea').disabled=true;
-  $('pi-textarea').style.opacity='0.45';
-  $('pi-file-name').textContent=filename;
-  $('pi-file-badge').style.display='inline-flex';
-  $('pi-upload-btn').style.display='none';
-}
-
-function _piClearFileMode(){
-  _piFromFile=false;
-  $('pi-textarea').disabled=false;
-  $('pi-textarea').style.opacity='';
-  $('pi-file-badge').style.display='none';
-  $('pi-file-name').textContent='';
-  $('pi-upload-btn').style.display='';
-  $('pi-txt-input').value='';
-}
-
 async function loadProjectInstructions(){
   try{
-    const r=await api('/project-context');
-    $('pi-textarea').value=r.text||'';
+    const r=await api('/instruction-sections');
+    $('pi-description').value  = r.description  || '';
+    $('pi-modules').value      = r.modules      || '';
+    $('pi-categories').value   = r.categories   || '';
+    $('pi-integrations').value = r.integrations || '';
+    $('pi-context').value      = r.context      || '';
+    const ekw = r.extra_keywords || '';
+    if(ekw){ $('pi-extra-keywords').value=ekw; $('pi-extra-kw-group').style.display=''; }
+    else    { $('pi-extra-kw-group').style.display='none'; }
     _setPiStatus(r.active);
-    // If we previously had file mode, keep it only if text is still there
-    if(!r.active) _piClearFileMode();
   }catch(e){ /* silent */ }
 }
 
-async function saveProjectInstructions(){
-  const text=$('pi-textarea').value.trim();
-  try{
-    const r=await api('/project-context',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text}),
-    });
-    _setPiStatus(r.active);
-    const status=$('pi-status');
-    if(r.active){
-      status.textContent=`✓ Saved (${r.length} chars) — LLM will use this context`;
-    } else {
-      status.textContent='Cleared — using rule-based ranking';
-      _piClearFileMode();
-    }
-  }catch(e){$('pi-status').textContent='⚠ Error saving: '+e.message;}
-}
-
-function piRemoveFile(){
-  $('pi-textarea').value='';
-  _piClearFileMode();
-  $('pi-status').textContent='File removed — instructions cleared. Save to confirm.';
-  $('pi-status').className='pi-status inactive';
-}
-
-function piFileSelected(file){
-  if(!file) return;
-  const reader=new FileReader();
-  reader.onload=e=>{
-    $('pi-textarea').value=e.target.result;
-    _piSetFileMode(file.name);
-    $('pi-status').textContent='File loaded — click 💾 Save to apply';
-    $('pi-status').className='pi-status inactive';
-  };
-  reader.readAsText(file,'utf-8');
-}
-
 async function markImpact(){
-  // 1. Save instructions first
-  await saveProjectInstructions();
-  const ctx=$('pi-textarea').value.trim();
-  if(!ctx){
-    $('pi-status').textContent='⚠ No instructions saved — add text or upload a file first.';
+  // Check if any instructions are loaded
+  const hasCtx = ($('pi-description').value||$('pi-modules').value||$('pi-context').value).trim();
+  if(!hasCtx){
+    $('pi-status').textContent='⚠ instruction.ini has no content — edit the file and click 🔄 Reload first.';
     return;
   }
-  // 2. Start reclassify job
+  // Start reclassify job
   try{
     const r=await api('/reclassify-all',{method:'POST'});
     if(r.status==='already_running'){
@@ -2535,93 +2545,93 @@ function _piStartPolling(){
     }catch(e){ /* network hiccup — keep polling */ }
   },2000);
 }
-function cfgDragOver(e){
-  e.preventDefault();
-  $('cfg-drop').classList.add('drag-over');
+
+/* ── Coverage Check ──────────────────────────────── */
+let _covItems=[];
+
+async function checkCoverage(){
+  const btn=$('pi-cov-btn');
+  btn.disabled=true;
+  btn.textContent='🔍 Checking…';
+  try{
+    const r=await api('/check-coverage');
+    btn.textContent='🔍 Check Coverage';
+    btn.disabled=false;
+    if(!r.items||r.items.length===0){
+      $('pi-status').textContent='✓ Coverage OK — all instruction modules are already crawled';
+      $('pi-status').className='pi-status active';
+      return;
+    }
+    _covItems=r.items;
+    _openCovModal(r.items, r.method);
+  }catch(e){
+    btn.textContent='🔍 Check Coverage';
+    btn.disabled=false;
+    $('pi-status').textContent='⚠ Coverage check failed: '+e.message;
+  }
 }
-function cfgDragLeave(){
-  $('cfg-drop').classList.remove('drag-over');
+
+function _openCovModal(items, method){
+  const methodLabel = method==='ai'
+    ? '<span class="cov-badge cov-badge-ai">AI</span>'
+    : '<span class="cov-badge cov-badge-rule">Rule-based</span>';
+  $('cov-subtitle').innerHTML=`${items.length} module(s) mentioned in your instructions are not currently crawled. ${methodLabel} Select which ones to add:`;
+  const list=$('cov-list');
+  list.innerHTML='';
+  items.forEach((item,i)=>{
+    const div=document.createElement('div');
+    div.className='cov-item';
+    div.innerHTML=`
+      <input type="checkbox" id="cov-chk-${i}" value="${esc(item.module)}" checked>
+      <label class="cov-item-label" for="cov-chk-${i}">
+        <strong>${esc(item.module)}</strong>
+        <span>${esc(item.reason||'')}</span>
+      </label>`;
+    list.appendChild(div);
+  });
+  $('cov-result').textContent='';
+  $('cov-overlay').classList.add('open');
 }
-function cfgDrop(e){
-  e.preventDefault();
-  $('cfg-drop').classList.remove('drag-over');
-  const file = e.dataTransfer.files[0];
-  if(file) cfgFileSelected(file);
+
+function closeCovModal(){$('cov-overlay').classList.remove('open');}
+function covCloseBg(e){if(e.target===$('cov-overlay'))closeCovModal();}
+
+function covSelectAll(){
+  const checks=document.querySelectorAll('#cov-list input[type=checkbox]');
+  const allChecked=[...checks].every(c=>c.checked);
+  checks.forEach(c=>c.checked=!allChecked);
+  $('cov-select-all').textContent=allChecked?'☑ Select All':'☐ Deselect All';
 }
-function cfgFileSelected(file){
-  if(!file) return;
-  const allowed = /\.(xlsx|xls|xlsm|csv)$/i;
-  if(!allowed.test(file.name)){
-    $('cfg-status').textContent = '⚠ Please upload an Excel file (.xlsx, .xls, .xlsm) or .csv';
+
+async function covApply(){
+  const checks=document.querySelectorAll('#cov-list input[type=checkbox]');
+  const selected=[...checks].filter(c=>c.checked).map(c=>c.value);
+  if(!selected.length){
+    $('cov-result').textContent='⚠ Select at least one module.';
     return;
   }
-  $('cfg-filename').textContent = '📄 ' + file.name;
-  $('cfg-status').textContent = 'Parsing…';
-  $('cfg-sheets').innerHTML = '';
-  const reader = new FileReader();
-  reader.onload = function(ev){
-    try{
-      if(typeof XLSX === 'undefined'){
-        $('cfg-status').textContent = '⚠ SheetJS library not loaded. Please check your connection.';
-        return;
-      }
-      const data = new Uint8Array(ev.target.result);
-      const wb = XLSX.read(data, {type:'array', cellDates:true});
-      $('cfg-status').textContent = `✓ Found ${wb.SheetNames.length} sheet${wb.SheetNames.length!==1?'s':''} in "${file.name}"`;
-      renderCfgSheets(wb);
-    }catch(err){
-      $('cfg-status').textContent = '⚠ Error parsing file: ' + err.message;
-    }
-  };
-  reader.readAsArrayBuffer(file);
+  const btn=$('cov-apply-btn');
+  btn.disabled=true;
+  btn.textContent='Adding…';
+  try{
+    const r=await api('/apply-coverage',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({keywords:selected}),
+    });
+    $('cov-result').innerHTML=`✓ Added ${r.added} module(s) to instruction.ini. <strong>Restart the app or run Crawl Now</strong> to fetch new content.`;
+    $('cov-result').style.color='var(--telus-accessible-green)';
+    btn.disabled=false;
+    btn.textContent='➕ Add to Crawl';
+    // Close after short delay
+    setTimeout(closeCovModal, 3000);
+  }catch(e){
+    $('cov-result').textContent='⚠ Failed: '+e.message;
+    btn.disabled=false;
+    btn.textContent='➕ Add to Crawl';
+  }
 }
-function renderCfgSheets(wb){
-  const container = $('cfg-sheets');
-  container.innerHTML = '';
-  wb.SheetNames.forEach(function(name, idx){
-    const ws = wb.Sheets[name];
-    const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:'', raw:false});
-    const dataRows = rows.filter(function(r){ return r.some(function(c){ return c!==''; }); });
-    const headers = dataRows[0] || [];
-    const previewRows = dataRows.slice(1, 6);
-    const card = document.createElement('div');
-    card.className = 'cfg-sheet-card';
-    const hdr = document.createElement('div');
-    hdr.className = 'cfg-sheet-header';
-    hdr.innerHTML = `<span class="cfg-sheet-name">📋 ${esc(name)}</span>`
-      + `<span class="cfg-sheet-meta">${dataRows.length>0?dataRows.length-1:0} data row${dataRows.length!==2?'s':''} &nbsp;·&nbsp; ${headers.length} column${headers.length!==1?'s':''}</span>`;
-    card.appendChild(hdr);
-    if(headers.length===0){
-      const empty = document.createElement('div');
-      empty.className = 'cfg-empty-sheet';
-      empty.textContent = 'Sheet is empty.';
-      card.appendChild(empty);
-    } else {
-      const wrap = document.createElement('div');
-      wrap.className = 'cfg-sheet-table-wrap';
-      let tbl = '<table class="cfg-sheet-table"><thead><tr>';
-      tbl += '<th style="color:var(--text-dim);font-weight:400">#</th>';
-      headers.forEach(function(h){ tbl += `<th>${esc(String(h))}</th>`; });
-      tbl += '</tr></thead><tbody>';
-      if(previewRows.length===0){
-        tbl += `<tr><td colspan="${headers.length+1}" style="font-style:italic;color:var(--text-dim)">No data rows</td></tr>`;
-      } else {
-        previewRows.forEach(function(row, ri){
-          tbl += `<tr><td style="color:var(--text-dim);font-size:0.75rem">${ri+1}</td>`;
-          headers.forEach(function(_,ci){ tbl += `<td title="${esc(String(row[ci]||''))}">${esc(String(row[ci]||''))}</td>`; });
-          tbl += '</tr>';
-        });
-        if(dataRows.length-1 > 5){
-          tbl += `<tr><td colspan="${headers.length+1}" style="font-style:italic;color:var(--text-dim);font-size:0.75rem;padding:6px 10px">… ${dataRows.length-1-5} more row${dataRows.length-1-5!==1?'s':''} not shown</td></tr>`;
-        }
-      }
-      tbl += '</tbody></table>';
-      wrap.innerHTML = tbl;
-      card.appendChild(wrap);
-    }
-    container.appendChild(card);
-  });
-}
+
 </script>
 </body>
 </html>
