@@ -1728,11 +1728,6 @@ function renderConclusion(records){
 
   let html='';
 
-  /* ── Side-by-side comparison table for all selected items ── */
-  html+=`<h3 style="color:var(--accent2);font-size:13px;margin-bottom:10px">
-    Side-by-Side Comparison</h3>`;
-  html+=buildSideBySideTable(records);
-
   /* ── Per-item version history (if any item has >1 version) ── */
   records.forEach(rec=>{
     const vers=rec.versions||[];
