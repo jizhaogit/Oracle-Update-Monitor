@@ -15,6 +15,8 @@ from typing import Optional
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+import configparser as _configparser
+
 from config import (
     IMPACT_KEYWORDS, LLM_PROVIDER, TAG_KEYWORDS, DATA_DIR,
     OPENAI_API_KEY, OPENAI_MODEL,
@@ -22,39 +24,108 @@ from config import (
     BEDROCK_MODEL_ID, BEDROCK_REGION, BEDROCK_PROFILE,
     OLLAMA_BASE_URL, OLLAMA_MODEL,
     LLM_TIMEOUT,
+    INSTRUCTION_FILE,
 )
 
 log = logging.getLogger(__name__)
 
-# Path where the user's project instructions are stored
+# Fallback path for backward compatibility (old project_context.txt)
 _PROJECT_CONTEXT_FILE = DATA_DIR / "project_context.txt"
 
 
 def _load_project_context() -> str:
-    """Return the saved project instructions, or empty string if none saved."""
+    """
+    Return the saved project instructions as a readable text block.
+
+    Primary source: instruction.ini (reads each section's key=value pairs into
+    a human-readable format suitable for the LLM prompt).
+    Fallback: data/project_context.txt (backward compat for old installs).
+
+    Categories are auto-derived from active crawl sources (ORACLE_SOURCES) and
+    appended automatically — they are NOT read from instruction.ini because
+    sources.ini is the authoritative source for what is being crawled.
+    """
+    try:
+        if INSTRUCTION_FILE.exists():
+            cp = _configparser.RawConfigParser()
+            cp.read(str(INSTRUCTION_FILE), encoding="utf-8")
+            # Skip [Crawl] — it holds system keywords, not AI context
+            # Skip [Scope] categories key — we inject it from ORACLE_SOURCES below
+            _SKIP_SECTIONS = {"crawl"}
+            lines = []
+            for section in cp.sections():
+                if section.lower() in _SKIP_SECTIONS:
+                    continue
+                for key, value in cp.items(section):
+                    if section.lower() == "scope" and key.lower() == "categories":
+                        continue   # replaced by auto-derived value below
+                    val = value.strip()
+                    if not val:
+                        continue
+                    label = f"{section.title()} {key.title()}"
+                    lines.append(f"{label}: {val}")
+
+            # Inject auto-derived categories from active crawl sources
+            try:
+                from config import ORACLE_SOURCES as _sources
+                auto_cats = sorted(set(v["category"] for v in _sources.values()))
+                if auto_cats:
+                    lines.append(f"Scope Categories: {', '.join(auto_cats)} (from active crawl sources)")
+            except Exception:
+                pass
+
+            return "\n".join(lines)
+    except Exception as exc:
+        log.warning("Could not read instruction.ini: %s", exc)
+
+    # Backward compat: fall back to old project_context.txt
     try:
         if _PROJECT_CONTEXT_FILE.exists():
             text = _PROJECT_CONTEXT_FILE.read_text(encoding="utf-8").strip()
             return text
     except Exception as exc:
-        log.warning("Could not read project context: %s", exc)
+        log.warning("Could not read project context fallback: %s", exc)
+
     return ""
 
 
 def save_project_context(text: str) -> None:
-    """Persist project instructions to disk."""
-    _PROJECT_CONTEXT_FILE.write_text(text.strip(), encoding="utf-8")
-    log.info("Project context saved (%d chars)", len(text.strip()))
+    """
+    Persist project instructions to instruction.ini.
+    The text IS the raw INI content (the textarea shows/edits raw INI).
+    """
+    INSTRUCTION_FILE.write_text(text.strip(), encoding="utf-8")
+    log.info("Project context saved to instruction.ini (%d chars)", len(text.strip()))
 
 
 # ── Rule-based classifier (always available) ───────────────────────────────────
 
 def _rule_based_impact(title: str, content: str) -> str:
     combined = (title + " " + content).lower()
-    for level, keywords in IMPACT_KEYWORDS.items():
-        for kw in keywords:
-            if kw in combined:
-                return level
+
+    # High always wins — check first.
+    for kw in IMPACT_KEYWORDS["High"]:
+        if kw in combined:
+            return "High"
+
+    # "Strong Low" indicators in the *title* (not just body) override weak Medium
+    # signals (e.g. "added", "updated") that often appear in documentation sentences.
+    # Oracle release-note titles like "Documentation Clarification for X" or
+    # "Bug Fix: Y" should be Low even when the body says "a note was added".
+    _STRONG_LOW_TITLE = {"documentation", "bug fix", "typo", "clarification",
+                         "updated docs"}
+    title_lower = title.lower()
+    if any(kw in title_lower for kw in _STRONG_LOW_TITLE):
+        return "Low"
+
+    # Otherwise check Medium then Low across the full combined text.
+    for kw in IMPACT_KEYWORDS["Medium"]:
+        if kw in combined:
+            return "Medium"
+    for kw in IMPACT_KEYWORDS["Low"]:
+        if kw in combined:
+            return "Low"
+
     return "Low"
 
 

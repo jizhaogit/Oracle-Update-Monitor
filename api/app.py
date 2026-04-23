@@ -44,6 +44,8 @@ from processor.summarizer import ask as qa_ask
 from processor.analyzer import analyze_impact
 from processor.jira_client import fetch_jira_issues_from_notes
 from processor.classifier import _load_project_context, save_project_context
+from processor.coverage import find_uncovered_ai, find_uncovered_rule_based, add_keywords_to_instruction
+from config import INSTRUCTION_FILE, LLM_PROVIDER
 
 log = logging.getLogger(__name__)
 
@@ -238,17 +240,116 @@ class ProjectContextRequest(BaseModel):
 
 @app.get("/project-context")
 def get_project_context():
-    """Return the saved project instructions text."""
-    text = _load_project_context()
-    return {"text": text, "active": bool(text)}
+    """
+    Return the raw content of instruction.ini for display in the textarea.
+    Falls back to the example template if instruction.ini does not exist yet.
+    """
+    from config import INSTRUCTION_FILE, INSTRUCTION_EXAMPLE_FILE
+    try:
+        if INSTRUCTION_FILE.exists():
+            text = INSTRUCTION_FILE.read_text(encoding="utf-8")
+        elif INSTRUCTION_EXAMPLE_FILE.exists():
+            text = INSTRUCTION_EXAMPLE_FILE.read_text(encoding="utf-8")
+        else:
+            text = ""
+    except Exception as exc:
+        log.warning("Could not read instruction.ini: %s", exc)
+        text = ""
+    return {"text": text, "active": bool(text.strip())}
 
 
 @app.post("/project-context")
 def set_project_context(body: ProjectContextRequest):
-    """Save project instructions. Pass empty string to clear."""
+    """Save raw INI text directly to instruction.ini."""
     save_project_context(body.text)
     text = body.text.strip()
     return {"saved": True, "active": bool(text), "length": len(text)}
+
+
+@app.get("/instruction-sections")
+def get_instruction_sections():
+    """
+    Return instruction.ini parsed into individual section fields for the structured UI.
+
+    'categories' is NOT read from instruction.ini — it is auto-derived from the
+    active crawl sources (sources.ini) so it is always in sync with what is
+    actually being crawled.
+    """
+    import configparser as _cp
+    from config import INSTRUCTION_FILE, INSTRUCTION_EXAMPLE_FILE, ORACLE_SOURCES
+
+    cp = _cp.RawConfigParser()
+    src = INSTRUCTION_FILE if INSTRUCTION_FILE.exists() else (
+          INSTRUCTION_EXAMPLE_FILE if INSTRUCTION_EXAMPLE_FILE.exists() else None)
+    if src:
+        cp.read(str(src), encoding="utf-8")
+
+    def _get(section, key):
+        try:
+            return cp.get(section, key).strip()
+        except Exception:
+            return ""
+
+    # Derive categories from what sources.ini actually crawls — never hardcoded.
+    auto_categories = ", ".join(sorted(set(
+        v["category"] for v in ORACLE_SOURCES.values()
+    )))
+
+    active = INSTRUCTION_FILE.exists() and bool(
+        _get("Project", "description") or _get("Scope", "modules") or _get("Context", "notes")
+    )
+    return {
+        "active":         active,
+        "description":    _get("Project", "description"),
+        "modules":        _get("Scope",   "modules"),
+        "categories":     auto_categories,   # auto-derived from sources.ini
+        "integrations":   _get("Scope",   "integrations"),
+        "context":        _get("Context", "notes"),
+        "extra_keywords": _get("Crawl",   "extra_keywords"),
+    }
+
+
+@app.get("/check-coverage")
+def check_coverage():
+    """
+    Detect Oracle modules mentioned in instruction.ini that are not in the current crawl.
+    Uses AI if LLM is configured, otherwise rule-based keyword matching.
+    """
+    from config import LLM_PROVIDER, INSTRUCTION_FILE
+    if not INSTRUCTION_FILE.exists():
+        return {"items": [], "method": "none", "message": "instruction.ini not found"}
+    try:
+        if LLM_PROVIDER in ("openai", "anthropic", "bedrock", "ollama"):
+            items = find_uncovered_ai(INSTRUCTION_FILE)
+            method = "ai"
+        else:
+            items = find_uncovered_rule_based(INSTRUCTION_FILE)
+            method = "rule-based"
+        return {"items": items, "method": method}
+    except Exception as exc:
+        log.error("Coverage check failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class ApplyCoverageRequest(BaseModel):
+    keywords: list[str]
+
+
+@app.post("/apply-coverage")
+def apply_coverage(body: ApplyCoverageRequest):
+    """
+    Add confirmed module keywords to instruction.ini [Crawl] extra_keywords.
+    The app must be restarted (or crawl re-run) for new keywords to take effect.
+    """
+    from config import INSTRUCTION_FILE
+    if not body.keywords:
+        return {"added": 0}
+    try:
+        add_keywords_to_instruction(INSTRUCTION_FILE, body.keywords)
+        return {"added": len(body.keywords), "keywords": body.keywords}
+    except Exception as exc:
+        log.error("apply-coverage failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/reclassify-all")
